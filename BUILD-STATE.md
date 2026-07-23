@@ -11,9 +11,13 @@ Next step: Start Session 2 — build `src/browser/` (Playwright wrapper emitting
 - 2026-07-23 S1: Session-frequency run dimension named `sessionsPerPersonaPerWeek`; run statuses `running|completed|budget-stopped|crashed`, session statuses `running|completed|hard-stopped|budget-capped` — CONTEXT.md implied but didn't enumerate these.
 - 2026-07-23 S1: In-session finding types enumerated as `console-error|http-failure|action-budget-exhausted|hard-stop`; cross-session as `duplicate-label|repeated-stumble-route|slow-checkpoint|recurring-dead-end` (from CONTEXT.md prose). Enforced by CHECK constraints — extending the list means a new migration.
 
+## Repo locations (from the user, post-S1)
+- **treeLine**: `C:\Users\james\Documents\treeLine` — pnpm workspace, code under `packages/`. Session 2 should explore its export surface there.
+- **Horse Haven Ops app** (the target): `C:\Users\james\Documents\volunteer-ops` — useful for drafting the domain pack (Session 8) and understanding routes/auth.
+- Other sibling repos referenced by CONTEXT.md also live in `C:\Users\james\Documents\` (e.g. `OpenEMR-QA`, `shenny`).
+
 ## Pending user input
 - Horse Haven staging URL/credentials — not needed until Session 2's smoke script (which may use any public/local page) and truly blocking only in Session 9.
-- treeLine repo location — Session 2 will look for a sibling directory or installed package; ask the user if not discoverable.
 
 ## What exists now
 - Compiling ESM TypeScript package (`npm run build` / `typecheck` / `test` / `lint` all pass).

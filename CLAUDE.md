@@ -34,7 +34,7 @@ You are building **Drover**, an open-source, config-driven simulation harness th
 
 ## treeLine dependency
 
-Drover consumes treeLine as a library for: Playwright `storageState` session re-seeding, auth-wall detection, and `resolveSeedUrl` crawl-target resolution (see CONTEXT.md "Relationship to treeLine"). The treeLine repo location and its export surface are **not documented here** — in Session 2, look for it as a sibling directory or installed package; if you cannot find it or its API doesn't expose what's needed, do NOT reimplement it. Define a thin interface (`src/treeline/adapter.ts`) with a stub implementation, log the gap in `TREELINE-GAPS.md`, note it in BUILD-STATE.md, and continue building against the interface. Ask the user where treeLine lives if it's not discoverable.
+Drover consumes treeLine as a library for: Playwright `storageState` session re-seeding, auth-wall detection, and `resolveSeedUrl` crawl-target resolution (see CONTEXT.md "Relationship to treeLine"). **The treeLine repo lives at `C:\Users\james\Documents\treeLine`** (a sibling of this repo — pnpm workspace, code under `packages/`). The Horse Haven Ops target app repo is the sibling **`C:\Users\james\Documents\volunteer-ops`**. Explore treeLine's export surface in Session 2; if its API doesn't expose what's needed, do NOT reimplement it. Define a thin interface (`src/treeline/adapter.ts`) with a stub implementation, log the gap in `TREELINE-GAPS.md`, note it in BUILD-STATE.md, and continue building against the interface.
 
 ---
 
