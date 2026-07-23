@@ -9,3 +9,4 @@ screenshots/
 .env
 .env.*
 *.tsbuildinfo
+*.db
