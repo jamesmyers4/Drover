@@ -1,6 +1,6 @@
 # Drover Build State
-Current session: 2 — DONE
-Next step: Start Session 3 — build `src/actor/` (perceive→decide→act LLM loop over `BrowserSession`, structured output, prompt caching, trait-shaped behavior, checkpoint detector DSL, in-session findings with screenshots, budget accounting, provider interface with dataPolicy enforcement).
+Current session: 3 — DONE
+Next step: Start Session 4 — build `src/orchestrator/` (reads `sim.config.ts` + domain pack, expands org size × simulated weeks × session frequency into a sequential persona-session schedule, per-session weighted goal draw, hard run-level dollar ceiling aggregating `computeCostUsd` across sessions, teardown hook, finding status reconciliation replacing S3's provisional `computeProvisionalMatchKey`, `drover run` CLI). Do not start Session 5.
 
 ## Decisions log
 - 2026-07-23 S1: Linter is **Biome** (not ESLint) — single fast tool, format + lint in one, zero plugin sprawl.
@@ -16,6 +16,16 @@ Next step: Start Session 3 — build `src/actor/` (perceive→decide→act LLM l
 - 2026-07-23 S2: `fill` values never enter the event log (only the selector) — keeps credentials/PII out of SQLite regardless of what a persona types.
 - 2026-07-23 S2: Device emulation presets are pinned in `src/browser/device.ts` (desktop 1280×720, Pixel-7-class mobile, iPad-class tablet) rather than referencing Playwright's device registry by name — stable across Playwright upgrades.
 - 2026-07-23 S2: Playwright pinned as a regular dependency (chromium installed via `npx playwright install chromium`); `tsx` devDep powers `npm run smoke`.
+- 2026-07-23 S3: `@anthropic-ai/sdk` (^0.114.0) added as a regular dependency. Actor tier default model is `claude-haiku-4-5` (`DEFAULT_ACTOR_MODEL`), per CONTEXT.md's model routing table — this overrides any general "default to Opus" guidance since it's the project's own explicit spec, not a generic choice.
+- 2026-07-23 S3: Persona traits `patience`/`techSavviness` are treated as **0..1 normalized** — CONTEXT.md types them as bare `number` with no range. `patience` → `maxRetries = round(1 + patience*4)` (bounds retries) and `pacingMs = round((1-patience)*500)` (a small wait between actions, skippable via `disablePacing` for tests/smoke). Needs codifying in Session 8's domain-pack authoring guide (see GAPS.md).
+- 2026-07-23 S3: Checkpoint detector DSL finalized as `kind:value` — `url:<substring>`, `selector:<css>`, `text:<substring, case-insensitive>` (`src/actor/checkpoint.ts`, documented in the new README.md skeleton). Detector strings are never shown to the persona; only `Checkpoint.description` is, in the static system prompt's milestone list.
+- 2026-07-23 S3: Perception (`capturePerception` in `src/actor/loop.ts`) reads `BrowserSession.page` directly rather than calling `readPageState`, so perceiving doesn't itself emit a `read-page` event before every decision — only the actual chosen action (navigate/click/fill) gets logged, keeping the event log to real actions.
+- 2026-07-23 S3: Structured decision output is a forced Anthropic tool call (`tool_choice: {type:"tool", name:"decide_action"}`), flat schema (`actionType` enum + optional `url`/`selector`/`value`/`outcome`), never free text. Malformed tool input throws `MalformedDecisionError`, caught by the loop's own patience-bounded retry, same as an execution failure.
+- 2026-07-23 S3: Prompt caching applied via `cache_control: {type:"ephemeral"}` on the static system block only (domain pack + archetype + checkpoint descriptions + optional route map) — the per-action user block is never cached. Below Haiku 4.5's ~4096-token minimum cacheable prefix, this silently just doesn't cache (no error) — expected for the toy example, worth watching once real domain packs make the static block bigger.
+- 2026-07-23 S3: `assertDataPolicyAllowed` enforces `restricted` dataPolicy against an approved-provider allowlist (currently just `["anthropic"]` — no Ollama/local provider implemented yet, see GAPS.md). Called at actor-loop construction time in Session 3; Session 4's orchestrator should call it once at config-load time per CLAUDE.md's non-negotiable constraint, not per-session.
+- 2026-07-23 S3: In-session finding `matchKey` stays provisional (`computeProvisionalMatchKey` in `src/actor/findings.ts`): `${type}:${normalizedTarget}`, stripping query/hash from URL-shaped targets. Session 4 owns the real cross-run matching key per the S1 decision log entry.
+- 2026-07-23 S3: `action-budget-exhausted` only fires when the goal's action budget is actually exhausted (the `while` loop's own exit), not when the persona's `finish` decision voluntarily ends the goal early (e.g. `outcome: "gave-up"`) — the two are behaviorally different but CONTEXT.md's four finding types have no "gave up early" type; logged as a candidate for a fifth type if real runs show it's worth distinguishing.
+- 2026-07-23 S3: Fixed a pre-existing S2 config bug while touching lint: `biome.json`'s `files.includes` never listed `scripts/**`, so `npm run lint`/`lint:fix` silently skipped `scripts/smoke.ts` (and would have skipped the new `scripts/smoke-actor.ts`) despite the npm script passing `scripts` on the CLI. Added `scripts/**` to the includes; both smoke scripts needed (and got) minor formatting fixes once actually linted.
 
 ## Repo locations (from the user, post-S1)
 - **treeLine**: `C:\Users\james\Documents\treeLine` — pnpm workspace, code under `packages/`. Drover consumes `packages/acquire`'s built `dist/` at runtime (see S2 decision).
@@ -24,6 +34,7 @@ Next step: Start Session 3 — build `src/actor/` (perceive→decide→act LLM l
 
 ## Pending user input
 - Horse Haven staging URL/credentials — smoke ran against the local fixture site instead (by design); creds become truly blocking only in Session 9. `SMOKE_URL=<url> npm run smoke` exercises any live target when available.
+- `ANTHROPIC_API_KEY` (or an `ant auth login` profile) — neither was available in the S3 build environment (no `ant` CLI installed either), so `npm run smoke:actor` could not be exercised against the real model this session; it prints a clear skip message and exits 0 rather than failing. All actor-loop mechanics (checkpoint success, in-session findings, budget-cap, hard-stop, action-budget-exhausted) are instead covered by 46 passing tests using a `ScriptedModelProvider`. Run `SMOKE_URL=... ANTHROPIC_API_KEY=... npm run smoke:actor` when a key becomes available to get the real-model confirmation.
 
 ## What exists now
 - Everything from S1 (types, `DroverDb` SQLite layer, migrations, tracking files).
@@ -32,7 +43,21 @@ Next step: Start Session 3 — build `src/actor/` (perceive→decide→act LLM l
 - `tests/fixtures/site.ts` — local fixture site (nav links, form, login page, dashboard, console-error page, 500 endpoint) used by tests and smoke; no network dependency.
 - `tests/browser.test.ts` (device mapping + 6 live-browser integration tests) and `tests/treeline-adapter.test.ts` (stub fallback + real-treeLine tests that auto-skip if the sibling `dist/` is missing). 24 tests total, all passing with the real adapter.
 - `npm run smoke` — hardcoded ~11-action sequence against the fixture site (or `SMOKE_URL`); writes run/session/13 events to `runs/smoke.sqlite`, prints per-type event counts, captures one screenshot, reports adapter kind and auth-wall detection.
+- `src/actor/` — the perceive→decide→act loop (`loop.ts`: `runPersonaSession`) driving one persona through one goal via `BrowserSession` primitives:
+  - `provider.ts` — `ModelProvider` interface; `AnthropicModelProvider` (real, forced `decide_action` tool call, prompt-cached static system block, default model `claude-haiku-4-5`); `ScriptedModelProvider` for tests; `assertDataPolicyAllowed`/`DataPolicyViolationError` (restricted dataPolicy enforcement); `createModelProvider` factory.
+  - `prompt.ts` — static (cacheable) system block from domain pack + archetype traits + checkpoint descriptions + optional route map; small per-action user block from page perception + recent history + remaining budget.
+  - `checkpoint.ts` — the `url:`/`selector:`/`text:` detector DSL, documented in `README.md`.
+  - `route-map.ts` — familiarity-gated (`returning`/`veteran` only) route map context via treeLine's `resolveSeedUrl`, degrading to no context on stub/failure.
+  - `budget.ts` — `computeCostUsd` pricing table (Haiku/Sonnet/Opus) + `SessionBudget` soft-cap enforcement (session ends `budget-capped`, not a crash).
+  - `findings.ts` — `recordInSessionFinding` (screenshot + short trace-snippet text, captured only when a finding fires) + provisional `computeProvisionalMatchKey`.
+  - Hard-stop (patience-bounded retries exhausted), budget-capped, and action-budget-exhausted (goal genuinely ran out of budget, not a voluntary early `finish`) are all distinct session outcomes with their own finding/status handling.
+- `DroverDb.getInSessionFindingsBySession` added (S1 only had single-id lookup; S3 needed to query/verify a session's findings).
+- `README.md` skeleton — checkpoint detector DSL section only; full content lands in Session 8.
+- `npm run smoke:actor` (`scripts/smoke-actor.ts`) — one real-model persona-session against the fixture site (sign-up goal) plus one against an impossible checkpoint (forces an `action-budget-exhausted` finding with screenshot); skips gracefully with an explanatory message when no Anthropic credentials are configured (none were in this build environment — see Pending user input).
+- Fixed a pre-existing S2 bug: `biome.json` didn't actually include `scripts/**`, so lint silently never checked either smoke script.
+- 46 tests total (22 new: checkpoint DSL, provider/data-policy, budget/pricing, and 5 live-browser `runPersonaSession` scenarios via `ScriptedModelProvider` — success, in-session findings, budget-cap, hard-stop, action-budget-exhausted), all passing. `tsc --noEmit`, `tsc` build, and `biome check` all clean.
 
 ## Session history
 - S1 2026-07-23: DONE — repo scaffold, all core types, SQLite layer with migrations, 9 passing tests.
 - S2 2026-07-23: DONE — browser harness (`BrowserSession` + device emulation + observation listeners + screenshot util), treeLine adapter with real `@treeline/acquire` integration (stub fallback), fixture site, smoke script writing real events to SQLite; 24 tests passing.
+- S3 2026-07-23: DONE — actor tier (`src/actor/`): perceive→decide→act loop, Anthropic provider with structured tool-use output + prompt caching, trait-shaped behavior (patience→retries/pacing, techSavviness→prompt framing, familiarity→treeLine route map), checkpoint detector DSL, budget accounting with soft-cap enforcement, in-session findings with screenshots, dataPolicy enforcement. 46 tests passing; real-model smoke script written but not run (no API key/`ant` CLI in this environment).

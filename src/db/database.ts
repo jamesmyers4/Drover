@@ -275,6 +275,13 @@ export class DroverDb {
       );
   }
 
+  getInSessionFindingsBySession(sessionId: string): InSessionFinding[] {
+    const rows = this.db
+      .prepare("SELECT id FROM in_session_findings WHERE session_id = ? ORDER BY created_at")
+      .all(sessionId) as { id: string }[];
+    return rows.map((r) => this.getInSessionFinding(r.id) as InSessionFinding);
+  }
+
   getCrossSessionFinding(id: string): CrossSessionFinding | undefined {
     const row = this.db.prepare("SELECT * FROM cross_session_findings WHERE id = ?").get(id) as
       | {

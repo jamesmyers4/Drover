@@ -16,7 +16,8 @@
     "test:watch": "vitest",
     "lint": "biome check src tests scripts",
     "lint:fix": "biome check --write src tests scripts",
-    "smoke": "tsx scripts/smoke.ts"
+    "smoke": "tsx scripts/smoke.ts",
+    "smoke:actor": "tsx scripts/smoke-actor.ts"
   },
   "keywords": [
     "qa",
@@ -30,6 +31,7 @@
     "node": ">=20"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.114.0",
     "better-sqlite3": "^12.11.1",
     "playwright": "^1.61.1"
   },

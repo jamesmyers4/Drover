@@ -85,7 +85,11 @@ async function main(): Promise<void> {
       console.log(`auth wall detected on /login: ${authWalled}`);
     }
 
-    const shot = await captureScreenshot(session.page, path.join("runs", "screenshots"), "smoke-final");
+    const shot = await captureScreenshot(
+      session.page,
+      path.join("runs", "screenshots"),
+      "smoke-final",
+    );
     if (shot) console.log(`screenshot: ${shot}`);
 
     db.updateSessionStatus(sessionId, "completed", Date.now());
