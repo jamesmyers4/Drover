@@ -275,6 +275,13 @@ export class DroverDb {
       );
   }
 
+  getCrossSessionFindingsByRun(runId: string): CrossSessionFinding[] {
+    const rows = this.db
+      .prepare("SELECT id FROM cross_session_findings WHERE run_id = ? ORDER BY created_at")
+      .all(runId) as { id: string }[];
+    return rows.map((r) => this.getCrossSessionFinding(r.id) as CrossSessionFinding);
+  }
+
   getInSessionFindingsBySession(sessionId: string): InSessionFinding[] {
     const rows = this.db
       .prepare("SELECT id FROM in_session_findings WHERE session_id = ? ORDER BY created_at")
@@ -331,7 +338,12 @@ export class DroverDb {
 
   getStatusHistory(matchKey: string): FindingStatusRecord[] {
     const rows = this.db
-      .prepare("SELECT * FROM finding_status_history WHERE match_key = ? ORDER BY recorded_at")
+      .prepare(
+        // rowid tiebreak: recorded_at is caller-supplied wall-clock time and
+        // can tie under fast automated writes (e.g. back-to-back runs in a
+        // test or a scripted batch) — rowid preserves true insertion order.
+        "SELECT * FROM finding_status_history WHERE match_key = ? ORDER BY recorded_at, rowid",
+      )
       .all(matchKey) as {
       match_key: string;
       run_id: string;
@@ -358,5 +370,58 @@ export class DroverDb {
       )
       .get(matchKey) as { n: number };
     return row.n;
+  }
+
+  /**
+   * Every match_key this app's *other* runs have ever recorded status for —
+   * the orchestrator's reconciliation (Session 4) diffs this against the
+   * current run's findings to detect resolved ones (open previously, absent
+   * now). Joins through `runs` since finding_status_history has no app_name
+   * column of its own.
+   */
+  getPriorMatchKeysForApp(appName: string, excludeRunId: string): string[] {
+    const rows = this.db
+      .prepare(
+        `SELECT DISTINCT h.match_key AS match_key FROM finding_status_history h
+         JOIN runs r ON r.id = h.run_id
+         WHERE r.app_name = ? AND h.run_id != ?`,
+      )
+      .all(appName, excludeRunId) as { match_key: string }[];
+    return rows.map((r) => r.match_key);
+  }
+
+  /** The most recent status record for a match_key from one of this app's other runs. */
+  getLatestStatusForMatchKeyExcludingRun(
+    appName: string,
+    matchKey: string,
+    excludeRunId: string,
+  ): FindingStatusRecord | undefined {
+    const row = this.db
+      .prepare(
+        // rowid tiebreak — see getStatusHistory's comment.
+        `SELECT h.* FROM finding_status_history h
+         JOIN runs r ON r.id = h.run_id
+         WHERE r.app_name = ? AND h.match_key = ? AND h.run_id != ?
+         ORDER BY h.recorded_at DESC, h.rowid DESC LIMIT 1`,
+      )
+      .get(appName, matchKey, excludeRunId) as
+      | {
+          match_key: string;
+          run_id: string;
+          finding_kind: FindingStatusRecord["findingKind"];
+          finding_id: string;
+          status: FindingStatusRecord["status"];
+          recorded_at: number;
+        }
+      | undefined;
+    if (!row) return undefined;
+    return {
+      matchKey: row.match_key,
+      runId: row.run_id,
+      findingKind: row.finding_kind,
+      findingId: row.finding_id,
+      status: row.status,
+      recordedAt: row.recorded_at,
+    };
   }
 }

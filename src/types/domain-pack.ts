@@ -23,6 +23,12 @@ export interface Checkpoint {
   detector: string;
 }
 
+/** Passed to a DomainPack's teardown hook (Session 4). */
+export interface DomainPackTeardownContext {
+  runId: string;
+  targetBaseUrl: string;
+}
+
 export interface DomainPack {
   appName: string;
   personas: PersonaArchetype[];
@@ -34,4 +40,12 @@ export interface DomainPack {
    * config-load time).
    */
   dataPolicy: "synthetic-only" | "restricted";
+  /**
+   * Optional config-declared cleanup hook that wipes run-created staging
+   * data (CONTEXT.md "Environment & safety": "staging teardown wipes
+   * everything a run created before the next one starts"). Not in
+   * CONTEXT.md's verbatim schema — added in Session 4, see BUILD-STATE.md.
+   * Runs finally-style: after a completed, budget-stopped, *or* crashed run.
+   */
+  teardown?: (ctx: DomainPackTeardownContext) => Promise<void>;
 }

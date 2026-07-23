@@ -17,3 +17,11 @@ CONTEXT.md's "Data routing & privacy" names a fully local model (via Ollama) as 
 ## 2026-07-23 (S3) — Persona trait numeric range isn't specified in CONTEXT.md
 
 CONTEXT.md types `patience`/`techSavviness` as `number` with no documented range. Session 3 assumed 0..1 normalized (`src/actor/prompt.ts` techSavviness bucketing, `src/actor/loop.ts` patience → retry cap and pacing delay). This needs to be codified explicitly in Session 8's domain-pack authoring guide so pack authors don't guess a different scale (e.g. 1-10).
+
+## 2026-07-23 (S4) — `concurrencyCap` config field has no effect yet
+
+`SimConfig.concurrencyCap` (`src/types/config.ts`) exists per CONTEXT.md's schema, but `runDiscovery` (`src/orchestrator/run-discovery.ts`) only implements the sequential path — every persona-session runs one at a time regardless of what a pack author sets this to. CONTEXT.md frames concurrency as "may exist as config but is not the default path," which Session 4 read as "sequential is the only path to actually build for v1," not "build both and default to sequential." An adopter who sets `concurrencyCap: 4` today gets silent no-op behavior, not an error and not concurrency. Post-v1: either implement bounded concurrency or have config validation reject/warn on a cap > 1 until it's real.
+
+## 2026-07-23 (S4) — Domain pack teardown hooks have no record of what a run created
+
+`DomainPack.teardown` (added this session, `src/types/domain-pack.ts` — not in CONTEXT.md's verbatim schema, see BUILD-STATE.md decisions log) is called with only `{ runId, targetBaseUrl }`. It has no list of the actual records/rows a run's personas created (signups, schedule edits, etc.) — CONTEXT.md's "staging teardown wipes everything a run created" assumes the pack author has *some* way to correlate created data back to a run. As built, that correlation is entirely the pack author's responsibility (e.g., tagging synthetic form data with the runId at fill-time, or a timestamp-window sweep) — Drover doesn't track "which app-side records this run touched" anywhere. Worth revisiting once a real domain pack (Session 8's Horse Haven Ops pack) actually needs to implement a non-trivial teardown and finds out whether `runId` alone is enough.

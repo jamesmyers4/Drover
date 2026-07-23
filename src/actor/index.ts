@@ -15,7 +15,6 @@ export {
 } from "./checkpoint.js";
 export {
   buildTraceSnippet,
-  computeProvisionalMatchKey,
   type RecordFindingOptions,
   recordInSessionFinding,
 } from "./findings.js";

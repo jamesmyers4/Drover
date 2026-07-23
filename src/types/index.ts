@@ -5,7 +5,12 @@ export type {
   RunDimensions,
   SimConfig,
 } from "./config.js";
-export type { Checkpoint, DomainPack, Goal } from "./domain-pack.js";
+export type {
+  Checkpoint,
+  DomainPack,
+  DomainPackTeardownContext,
+  Goal,
+} from "./domain-pack.js";
 export type { ActionEvent } from "./events.js";
 export type {
   CrossSessionFinding,
