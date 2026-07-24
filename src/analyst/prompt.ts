@@ -13,7 +13,7 @@ export function buildAnalystSystemPrompt(): string {
     "Your job is to find patterns visible only across sessions, that no single session's actor would have noticed on its own:",
     "- duplicate-label: the same or near-duplicate UI label/copy showing up in confusingly repetitive ways across the app.",
     "- repeated-stumble-route: a route or flow that multiple independent sessions got stuck on, retried, or failed at.",
-    "- slow-checkpoint: a goal that's technically reachable but took an abnormally long time or an abnormally high action count in some sessions compared to other sessions attempting the same goal.",
+    "- slow-checkpoint: a checkpoint that's technically reachable but took an abnormally long time in some sessions compared to other sessions that reached the same checkpoint id (compare each session's \"Checkpoint reach times\" for matching checkpoint ids), or a goal that took an abnormally high action count in some sessions compared to others attempting the same goal.",
     "- recurring-dead-end: a page or action that repeatedly leads nowhere useful across sessions.",
     "Only report a pattern that's actually visible across two or more of the provided sessions, or is a single occurrence severe enough to merit flagging on its own (e.g. a hard-stop tied to a real bug). Do not invent a pattern from one unremarkable session.",
     'For each finding, set "route" to the specific route, label text, or checkpoint the pattern is anchored to — this becomes the finding\'s identity across future runs, so keep it specific and stable (e.g. a path like "/schedule/edit", not a vague phrase).',
@@ -40,6 +40,14 @@ function formatDigest(d: SessionDigest): string {
     `Session ${d.sessionId} — persona ${d.personaId}, goal ${d.goalId}, status: ${d.status}`,
     metrics.join(", "),
   ];
+
+  const checkpointIds = Object.keys(d.checkpointReachTimesMs);
+  if (checkpointIds.length > 0) {
+    const reachLines = checkpointIds
+      .map((id) => `  - ${id}: ${d.checkpointReachTimesMs[id]}ms`)
+      .join("\n");
+    lines.push(`Checkpoint reach times (elapsed ms from session start):\n${reachLines}`);
+  }
 
   if (d.findingsSummary.length > 0) {
     lines.push(`In-session findings:\n${d.findingsSummary.map((f) => `  - ${f}`).join("\n")}`);

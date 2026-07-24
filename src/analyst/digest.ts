@@ -5,15 +5,16 @@
  * timestamps, never stored as schema columns (CONTEXT.md "Data capture &
  * storage").
  *
- * Note: `ActionEvent.checkpointId` is now populated by the actor loop (it
- * tags the event whose action newly satisfied a checkpoint — see
- * `src/actor/loop.ts`), but this digest doesn't consume it yet:
- * `totalDurationMs` grouped by `goalId` remains the proxy for "checkpoint
- * technically reachable but abnormally slow," with the analyst comparing
- * session durations for the same goal itself rather than us pre-computing
- * outliers. Wiring true per-checkpoint reach times into the digest (would
- * need goal/checkpoint context this function doesn't currently take) is a
- * follow-on, not done here.
+ * `checkpointReachTimesMs` is computed from `ActionEvent.checkpointId`,
+ * which the actor loop populates on the event whose action newly satisfied a
+ * checkpoint (see `src/actor/loop.ts`) — this gives the analyst true
+ * per-checkpoint elapsed time (checkpoint-reach timestamp minus session
+ * start) instead of the older whole-session-duration-by-goal proxy. It
+ * doesn't need the originating `Goal`/`Checkpoint` definitions (descriptions,
+ * ordering) since `runAnalyst` only has the run's `SimConfig` snapshot, not
+ * the domain pack itself — checkpoint ids alone are enough for the analyst
+ * to compare the same checkpoint's reach time across sessions sharing a
+ * `goalId`.
  */
 
 import type { DroverDb } from "../db/database.js";
@@ -33,6 +34,12 @@ export interface SessionDigest {
   totalDurationMs?: number;
   /** Longest gap between two consecutive events, in ms — a "time stuck" proxy. */
   longestGapMs?: number;
+  /**
+   * Elapsed ms from session start to the first event tagged with each
+   * checkpoint id this session reached — true per-checkpoint reach latency,
+   * keyed by checkpoint id. Empty if the session reached no checkpoints.
+   */
+  checkpointReachTimesMs: Record<string, number>;
   /** "type (severity): description" lines, one per in-session finding. */
   findingsSummary: string[];
   /** "[actionType] target — reasoning" lines, truncated for very long sessions. */
@@ -59,6 +66,13 @@ export function buildSessionDigest(db: DroverDb, session: PersonaSession): Sessi
     if (longestGapMs === undefined || gap > longestGapMs) longestGapMs = gap;
   }
 
+  const checkpointReachTimesMs: Record<string, number> = {};
+  for (const event of events) {
+    if (event.checkpointId && !(event.checkpointId in checkpointReachTimesMs)) {
+      checkpointReachTimesMs[event.checkpointId] = event.timestamp - session.startedAt;
+    }
+  }
+
   const truncated = events.length > MAX_ACTIONS_IN_DIGEST;
   const shown = truncated ? events.slice(0, MAX_ACTIONS_IN_DIGEST) : events;
   const actionsSummary = shown.map((e) => `[${e.actionType}] ${e.target} — ${e.reasoning}`);
@@ -77,6 +91,7 @@ export function buildSessionDigest(db: DroverDb, session: PersonaSession): Sessi
     ...(timeToFirstActionMs !== undefined && { timeToFirstActionMs }),
     ...(totalDurationMs !== undefined && { totalDurationMs }),
     ...(longestGapMs !== undefined && { longestGapMs }),
+    checkpointReachTimesMs,
     findingsSummary,
     actionsSummary,
   };

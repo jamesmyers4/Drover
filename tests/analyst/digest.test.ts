@@ -113,6 +113,51 @@ describe("buildSessionDigest", () => {
     expect(digest.actionsSummary).toEqual([]);
   });
 
+  it("computes per-checkpoint reach times from checkpoint-tagged events, keeping the first reach", () => {
+    const session = makeSession();
+    db.insertActionEvent({
+      sessionId: session.id,
+      timestamp: 1200,
+      actionType: "navigate",
+      target: "/a",
+      reasoning: "start",
+    });
+    const taggedEventId = db.insertActionEvent({
+      sessionId: session.id,
+      timestamp: 1800,
+      actionType: "click",
+      target: "#submit",
+      reasoning: "submit the form",
+    });
+    db.updateActionEventCheckpoint(taggedEventId, "cp-signup-complete");
+    const secondTagId = db.insertActionEvent({
+      sessionId: session.id,
+      timestamp: 3400,
+      actionType: "click",
+      target: "#next",
+      reasoning: "keep going",
+    });
+    db.updateActionEventCheckpoint(secondTagId, "cp-signup-complete");
+
+    const digest = buildSessionDigest(db, session);
+
+    expect(digest.checkpointReachTimesMs).toEqual({ "cp-signup-complete": 800 }); // 1800 - 1000, first reach wins
+  });
+
+  it("has an empty checkpointReachTimesMs when no event was tagged with a checkpoint", () => {
+    const session = makeSession();
+    db.insertActionEvent({
+      sessionId: session.id,
+      timestamp: 1200,
+      actionType: "navigate",
+      target: "/a",
+      reasoning: "start",
+    });
+
+    const digest = buildSessionDigest(db, session);
+    expect(digest.checkpointReachTimesMs).toEqual({});
+  });
+
   it("includes in-session findings as summary lines", () => {
     const session = makeSession();
     const eventId = db.insertActionEvent({
