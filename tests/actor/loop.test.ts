@@ -2,7 +2,12 @@ import type { Browser } from "playwright";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { SessionBudget } from "../../src/actor/budget.js";
 import { runPersonaSession } from "../../src/actor/loop.js";
-import { ScriptedModelProvider } from "../../src/actor/provider.js";
+import {
+  type ActorDecideResult,
+  MalformedDecisionError,
+  type ModelProvider,
+  ScriptedModelProvider,
+} from "../../src/actor/provider.js";
 import { BrowserSession, launchBrowser } from "../../src/browser/session.js";
 import { DroverDb, newId } from "../../src/db/database.js";
 import { createTreelineAdapter, type TreelineAdapter } from "../../src/treeline/adapter.js";
@@ -316,6 +321,75 @@ describe("runPersonaSession", () => {
       expect(result.actionsTaken).toBe(1);
       const findings = db.getInSessionFindingsBySession(sessionId);
       expect(findings.some((f) => f.type === "action-budget-exhausted")).toBe(true);
+    },
+    TIMEOUT,
+  );
+
+  it(
+    "records the billed cost of a malformed decide_action call against budget, not just successful ones",
+    async () => {
+      await setUp();
+      const goal: Goal = {
+        id: "finish-goal",
+        description: "Finish right away.",
+        actionBudget: 5,
+        checkpoints: [{ id: "never", description: "Never.", detector: "url:/never-reached" }],
+        successCheckpointId: "never",
+      };
+
+      let calls = 0;
+      const provider: ModelProvider = {
+        provider: "test-malformed",
+        model: "test-malformed",
+        async decide(): Promise<ActorDecideResult> {
+          calls++;
+          if (calls === 1) {
+            // Simulates the real AnthropicModelProvider: the API call came
+            // back and was billed, but the tool call didn't parse — usage
+            // still travels with the thrown error (see src/actor/provider.ts).
+            throw new MalformedDecisionError("simulated malformed tool call", {
+              inputTokens: 100,
+              outputTokens: 10,
+              cacheWriteTokens: 0,
+              cacheReadTokens: 0,
+              costUsd: 0.01,
+            });
+          }
+          return {
+            decision: { reasoning: "Give up.", actionType: "finish", outcome: "gave-up" },
+            usage: {
+              inputTokens: 0,
+              outputTokens: 0,
+              cacheWriteTokens: 0,
+              cacheReadTokens: 0,
+              costUsd: 0.002,
+            },
+          };
+        },
+      };
+
+      const budget = new SessionBudget(1);
+      const result = await runPersonaSession({
+        db,
+        browserSession: session,
+        browser,
+        sessionId,
+        provider,
+        archetype: makeArchetype(),
+        domainPack,
+        goal,
+        treelineAdapter: stubAdapter,
+        targetBaseUrl: site.baseUrl,
+        budget,
+        screenshotDir: "runs/screenshots-test",
+        disablePacing: true,
+      });
+
+      expect(calls).toBe(2);
+      // Both the malformed call's billed cost (0.01) and the successful
+      // retry's cost (0.002) must be reflected — not just the successful one.
+      expect(result.totalCostUsd).toBeCloseTo(0.012, 6);
+      expect(budget.spent).toBeCloseTo(0.012, 6);
     },
     TIMEOUT,
   );

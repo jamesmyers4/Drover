@@ -45,7 +45,17 @@ export interface ModelProvider {
 }
 
 export class MalformedDecisionError extends Error {
-  constructor(reason: string) {
+  /**
+   * Set when the underlying API call itself succeeded (billed by the
+   * provider) and only the tool-call payload failed to parse — lets callers
+   * still record real spend against budget instead of losing it (GAPS.md:
+   * "cost of a malformed decide_action call isn't recorded against budget").
+   * Undefined when no API response was ever received (nothing was billed).
+   */
+  constructor(
+    reason: string,
+    readonly usage?: TokenUsage & { costUsd: number },
+  ) {
     super(`Model returned a malformed decide_action call: ${reason}`);
     this.name = "MalformedDecisionError";
   }
@@ -87,13 +97,21 @@ const DECIDE_TOOL: Anthropic.Tool = {
   },
 };
 
+/**
+ * Thrown only internally by `parseDecision` — carries just the reason, never
+ * usage (it doesn't know whether an API call was ever billed). `decide()`
+ * catches this and re-throws the public `MalformedDecisionError` with
+ * whatever billed usage it has on hand.
+ */
+class DecisionParseError extends Error {}
+
 function parseDecision(input: unknown): ActorDecision {
   if (typeof input !== "object" || input === null) {
-    throw new MalformedDecisionError("tool input was not an object");
+    throw new DecisionParseError("tool input was not an object");
   }
   const obj = input as Record<string, unknown>;
   if (typeof obj.reasoning !== "string" || !obj.reasoning.trim()) {
-    throw new MalformedDecisionError("missing or empty 'reasoning'");
+    throw new DecisionParseError("missing or empty 'reasoning'");
   }
   if (
     obj.actionType !== "navigate" &&
@@ -101,7 +119,7 @@ function parseDecision(input: unknown): ActorDecision {
     obj.actionType !== "fill" &&
     obj.actionType !== "finish"
   ) {
-    throw new MalformedDecisionError(`invalid actionType "${String(obj.actionType)}"`);
+    throw new DecisionParseError(`invalid actionType "${String(obj.actionType)}"`);
   }
   const decision: ActorDecision = { reasoning: obj.reasoning, actionType: obj.actionType };
   if (typeof obj.url === "string") decision.url = obj.url;
@@ -110,13 +128,13 @@ function parseDecision(input: unknown): ActorDecision {
   if (obj.outcome === "success" || obj.outcome === "gave-up") decision.outcome = obj.outcome;
 
   if (decision.actionType === "navigate" && !decision.url) {
-    throw new MalformedDecisionError("actionType 'navigate' requires 'url'");
+    throw new DecisionParseError("actionType 'navigate' requires 'url'");
   }
   if ((decision.actionType === "click" || decision.actionType === "fill") && !decision.selector) {
-    throw new MalformedDecisionError(`actionType '${decision.actionType}' requires 'selector'`);
+    throw new DecisionParseError(`actionType '${decision.actionType}' requires 'selector'`);
   }
   if (decision.actionType === "fill" && decision.value === undefined) {
-    throw new MalformedDecisionError("actionType 'fill' requires 'value'");
+    throw new DecisionParseError("actionType 'fill' requires 'value'");
   }
   return decision;
 }
@@ -148,19 +166,32 @@ export class AnthropicModelProvider implements ModelProvider {
       tool_choice: { type: "tool", name: "decide_action" },
     });
 
-    const block = response.content.find(
-      (b): b is Anthropic.ToolUseBlock => b.type === "tool_use" && b.name === "decide_action",
-    );
-    if (!block) throw new MalformedDecisionError("no decide_action tool_use block in response");
-    const decision = parseDecision(block.input);
-
+    // Computed unconditionally, before parsing — the API call is billed by
+    // Anthropic as soon as `response` comes back, regardless of whether the
+    // tool call inside it turns out to be well-formed.
     const usage: TokenUsage = {
       inputTokens: response.usage.input_tokens,
       outputTokens: response.usage.output_tokens,
       cacheWriteTokens: response.usage.cache_creation_input_tokens ?? 0,
       cacheReadTokens: response.usage.cache_read_input_tokens ?? 0,
     };
-    return { decision, usage: { ...usage, costUsd: computeCostUsd(this.model, usage) } };
+    const billedUsage = { ...usage, costUsd: computeCostUsd(this.model, usage) };
+
+    const block = response.content.find(
+      (b): b is Anthropic.ToolUseBlock => b.type === "tool_use" && b.name === "decide_action",
+    );
+    if (!block) {
+      throw new MalformedDecisionError("no decide_action tool_use block in response", billedUsage);
+    }
+    let decision: ActorDecision;
+    try {
+      decision = parseDecision(block.input);
+    } catch (err) {
+      if (err instanceof DecisionParseError)
+        throw new MalformedDecisionError(err.message, billedUsage);
+      throw err;
+    }
+    return { decision, usage: billedUsage };
   }
 }
 

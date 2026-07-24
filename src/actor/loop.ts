@@ -16,7 +16,7 @@ import type { SessionBudget } from "./budget.js";
 import { evaluateCheckpoints } from "./checkpoint.js";
 import { recordInSessionFinding } from "./findings.js";
 import { buildActionPrompt, buildStaticSystemPrompt } from "./prompt.js";
-import type { ActorDecision, ModelProvider } from "./provider.js";
+import { type ActorDecision, MalformedDecisionError, type ModelProvider } from "./provider.js";
 import { buildRouteMapContext } from "./route-map.js";
 
 const MAX_ARIA_SNAPSHOT_CHARS = 4000;
@@ -234,6 +234,13 @@ export async function runPersonaSession(
         break;
       } catch (err) {
         lastErrorMessage = err instanceof Error ? err.message : String(err);
+        // A malformed decide_action call still gets billed by the provider
+        // even though parsing failed — record that spend against budget
+        // rather than losing it (see GAPS.md).
+        if (err instanceof MalformedDecisionError && err.usage) {
+          budget.record(err.usage.costUsd);
+          totalCostUsd += err.usage.costUsd;
+        }
         history.push(`[error] previous attempt failed: ${lastErrorMessage}`);
       }
     }

@@ -1,12 +1,35 @@
-import { describe, expect, it } from "vitest";
-import {
+import { describe, expect, it, vi } from "vitest";
+
+// The real SDK's `messages` is an instance property set in the constructor
+// (`this.messages = new API.Messages(this)`), not a prototype getter, so it
+// can't be spied on after construction — mock the whole module instead. This
+// also means these tests never need real ANTHROPIC_API_KEY credentials.
+const { mockCreate } = vi.hoisted(() => ({ mockCreate: vi.fn() }));
+vi.mock("@anthropic-ai/sdk", () => ({
+  // A regular function, not an arrow function — arrow functions can't be
+  // constructors, and `new Anthropic()` in provider.ts requires this to be
+  // callable with `new`.
+  default: vi.fn().mockImplementation(function MockAnthropic(this: { messages: unknown }) {
+    this.messages = { create: mockCreate };
+  }),
+}));
+
+const {
   AnthropicModelProvider,
   assertDataPolicyAllowed,
   createModelProvider,
   DataPolicyViolationError,
   DEFAULT_ACTOR_MODEL,
+  MalformedDecisionError,
   ScriptedModelProvider,
-} from "../../src/actor/provider.js";
+} = await import("../../src/actor/provider.js");
+
+const BASE_USAGE = {
+  input_tokens: 1000,
+  output_tokens: 20,
+  cache_creation_input_tokens: 0,
+  cache_read_input_tokens: 0,
+};
 
 describe("assertDataPolicyAllowed", () => {
   it("allows any provider for synthetic-only domain packs", () => {
@@ -39,6 +62,63 @@ describe("createModelProvider", () => {
     expect(() => createModelProvider({ provider: "not-a-real-provider", model: "x" })).toThrow(
       /Unsupported actor-tier provider/,
     );
+  });
+});
+
+describe("AnthropicModelProvider malformed decisions still report billed usage", () => {
+  it("attaches billed usage to MalformedDecisionError when no tool_use block comes back", async () => {
+    mockCreate.mockResolvedValueOnce({
+      content: [{ type: "text", text: "oops" }],
+      usage: BASE_USAGE,
+    });
+    const provider = new AnthropicModelProvider(DEFAULT_ACTOR_MODEL);
+
+    const err = await provider
+      .decide({ systemPrompt: "s", userPrompt: "u" })
+      .catch((e: unknown) => e);
+
+    expect(err).toBeInstanceOf(MalformedDecisionError);
+    const malformed = err as InstanceType<typeof MalformedDecisionError>;
+    expect(malformed.usage).toBeDefined();
+    expect(malformed.usage?.inputTokens).toBe(1000);
+    expect(malformed.usage?.outputTokens).toBe(20);
+    expect(malformed.usage?.costUsd).toBeGreaterThan(0);
+  });
+
+  it("attaches billed usage to MalformedDecisionError when the tool input fails validation", async () => {
+    mockCreate.mockResolvedValueOnce({
+      content: [{ type: "tool_use", name: "decide_action", input: { actionType: "navigate" } }],
+      usage: BASE_USAGE,
+    });
+    const provider = new AnthropicModelProvider(DEFAULT_ACTOR_MODEL);
+
+    const err = await provider
+      .decide({ systemPrompt: "s", userPrompt: "u" })
+      .catch((e: unknown) => e);
+
+    expect(err).toBeInstanceOf(MalformedDecisionError);
+    const malformed = err as InstanceType<typeof MalformedDecisionError>;
+    expect(malformed.message).toMatch(/missing or empty 'reasoning'/);
+    expect(malformed.usage?.costUsd).toBeGreaterThan(0);
+  });
+
+  it("returns the same usage/cost shape as a well-formed decision on success", async () => {
+    mockCreate.mockResolvedValueOnce({
+      content: [
+        {
+          type: "tool_use",
+          name: "decide_action",
+          input: { reasoning: "go home", actionType: "navigate", url: "https://example.test" },
+        },
+      ],
+      usage: BASE_USAGE,
+    });
+    const provider = new AnthropicModelProvider(DEFAULT_ACTOR_MODEL);
+
+    const result = await provider.decide({ systemPrompt: "s", userPrompt: "u" });
+
+    expect(result.decision.actionType).toBe("navigate");
+    expect(result.usage.costUsd).toBeGreaterThan(0);
   });
 });
 
