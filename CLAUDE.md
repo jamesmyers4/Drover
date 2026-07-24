@@ -1,174 +1,174 @@
-# CLAUDE.md — Drover Build Playbook
+# CLAUDE.md — Drover Technical Reference
 
-You are building **Drover**, an open-source, config-driven simulation harness that runs AI-driven personas through a web app to surface bugs, confusing flows, and performance problems. The full product/architecture spec is in **`CONTEXT.md`** in this repo root. Read it in full at the start of every session before doing anything else. This file tells you *how the build is sequenced*; CONTEXT.md tells you *what to build and why*. Where the two conflict, CONTEXT.md wins on design decisions and this file wins on session sequencing.
+Drover is an open-source, config-driven simulation harness that runs AI-driven personas through a web app to surface bugs, confusing flows, and performance problems. The full product/architecture spec is in **`CONTEXT.md`** in this repo root — read it in full at the start of every session before doing anything else. This file is the technical map of what actually exists in the codebase and the decisions that shaped it; CONTEXT.md is the spec, this file is the as-built reality. Where the two conflict, treat CONTEXT.md as the intended design and this file (plus `BUILD-STATE.md`'s decisions log) as what was actually implemented and why it may differ.
+
+Also read `BUILD-STATE.md` (current status, decisions log, pending user input) and skim `GAPS.md` / `TREELINE-GAPS.md` (known blind spots) before making non-trivial changes — several "obvious" improvements are already logged there as deliberate post-v1 deferrals.
 
 ---
 
-## How to work in this repo (read every session)
+## Build status
 
-1. **At session start, in order:** read `CONTEXT.md`, read this file, read `BUILD-STATE.md` (created in Session 1). BUILD-STATE.md tells you which session you are in and what the previous session left unfinished.
-2. **One session = one scope block below.** Do not start the next session's scope, even if you finish early and even if it seems easy. Finishing early means more polish, tests, and documentation for the *current* scope — not scope creep forward. This is a deliberate control: each session must end in a state a fresh model with zero conversation history can pick up.
-3. **Hard stop conditions.** Stop the session immediately (finish the current file edit, commit, update BUILD-STATE.md, then end) when ANY of these hit:
-   - The session's "Done means" checklist is fully satisfied.
-   - You hit a design question CONTEXT.md doesn't answer and that materially changes the architecture. Log it in `GAPS.md`, mark the session `BLOCKED` in BUILD-STATE.md with the question stated plainly, and stop. Do not guess on architecture-level decisions.
-   - Context is getting long and you are less than ~80% through the session scope: checkpoint your progress in BUILD-STATE.md with enough detail to resume, commit working code, and stop.
-4. **End-of-session ritual (never skip, even when blocked):**
-   - All code compiles (`npm run build` or `tsc --noEmit` passes) and tests pass. Never end a session with a broken build — revert the offending change instead.
-   - Commit with a message prefixed by the session number, e.g. `S3: discovery-mode orchestrator loop`.
-   - Update `BUILD-STATE.md`: session number, status (`DONE` / `PARTIAL` / `BLOCKED`), what exists now, what's left, any decisions made that CONTEXT.md didn't dictate (with one-line rationale), and the exact next step for the following session.
-   - Append anything learned to `GAPS.md` (Drover's own blind spots) or `TREELINE-GAPS.md` (treeLine limitations) per the Learning Loop section of CONTEXT.md.
-5. **The user starts each new session manually.** End your final message with: "Session N complete (or blocked). Start a fresh Claude Code session and say: **continue the Drover build**." A fresh session that reads this file + BUILD-STATE.md must be able to continue with no other context.
+Sessions 1–5 of the original build plan are done: core types + SQLite layer, browser harness + treeLine adapter, the actor tier (LLM persona loop), the discovery-mode orchestrator, and the analyst tier (cross-session pattern mining). See `BUILD-STATE.md` for the authoritative, up-to-date status, the full decisions log, and the exact next step.
+
+**Not yet built:** reporting (`src/report/`, markdown report generation + `drover report` CLI), Stampede mode (`src/stampede/`, scripted load replay), the example domain packs and README quickstart (`examples/`, full README), the real Horse Haven Ops domain pack, and a validation run against Horse Haven staging. These map to the original plan's Session 6–9 scope. Treat CONTEXT.md's relevant sections ("Reporting," "Stampede mode," "Open source packaging") as the spec for that work when it's picked up.
+
+No `ANTHROPIC_API_KEY` has been available in any build environment so far — every real-model code path (actor tier, analyst tier's Batch API) is implemented and covered by scripted/mocked tests, but has never been exercised against a live model. The smoke scripts (`npm run smoke:actor`, `smoke:orchestrator`, `smoke:analyst`) detect the missing key and skip gracefully rather than failing. Run them with a real key before trusting real-model behavior.
+
+---
 
 ## Non-negotiable constraints (from CONTEXT.md — do not re-decide these)
 
 - **Phase 1 scope only.** No fixer tier, no quorum, no auto-promotion of findings, no CI/scheduled runs, no accessibility/visual-drift modules, no installable domain-pack packages. If tempted, log the idea in `GAPS.md` and move on.
-- **Sequential persona execution** is the default. A concurrency cap may exist as config but is not the default path.
+- **Sequential persona execution** is the default and, as built, the *only* implemented path — `SimConfig.concurrencyCap` exists in the type but `runDiscovery` ignores it (logged in `GAPS.md`). Don't silently start honoring it without also validating/rejecting cap > 1 until real concurrency is implemented.
 - **SQLite only** for Drover's data, fully separate from any target app's database.
 - **Zero write access to anything external:** no auto-filed GitHub issues, no writes to the target app's data stores beyond what personas do through the UI, and staging teardown wipes everything a run created.
 - **Never run against production.** Staging with synthetic data only. The Horse Haven target is `volunteer.horsehaventn` staging.
-- **Secrets never enter prompt content.** Auth tokens, cookies, API keys live in the orchestrator's HTTP layer only, regardless of provider.
-- **`dataPolicy` is enforced, not advisory:** `restricted` packs must refuse to run with a non-approved provider configured for the actor tier.
-- **Budget knobs are load-bearing:** hard per-run dollar ceiling (graceful shutdown, never dies mid-write) and soft per-persona-session cap. Build them early (Session 3), not as an afterthought.
+- **Secrets never enter prompt content.** Auth tokens, cookies, API keys live in the orchestrator's HTTP layer only, regardless of provider. `fill()` primitive values are never written to the event log either (only the selector) — same principle applied one layer deeper.
+- **`dataPolicy` is enforced, not advisory:** `restricted` packs must refuse to run with a non-approved provider configured for the actor tier. Implemented as `assertDataPolicyAllowed` in `src/actor/provider.ts`; approved-provider set for `restricted` is currently just `["anthropic"]` — no local/Ollama provider exists yet (see `GAPS.md`).
+- **Budget knobs are load-bearing:** hard per-run dollar ceiling (graceful shutdown, never dies mid-write — checked *between* sessions, never mid-session) and soft per-persona-session cap. Both implemented. The analyst tier has cost accounting but no enforcement yet (logged gap — low risk since it's one Batch call per `analyze` invocation, not per-session).
 - **Config is typed TypeScript** (`sim.config.ts`), not JSON/YAML. License is MIT. Single package, no monorepo.
-- **Reasoning capture is one sentence per action**, not chain-of-thought. Screenshots/traces only at the moment a finding is flagged.
-
-## treeLine dependency
-
-Drover consumes treeLine as a library for: Playwright `storageState` session re-seeding, auth-wall detection, and `resolveSeedUrl` crawl-target resolution (see CONTEXT.md "Relationship to treeLine"). **The treeLine repo lives at `C:\Users\james\Documents\treeLine`** (a sibling of this repo — pnpm workspace, code under `packages/`). The Horse Haven Ops target app repo is the sibling **`C:\Users\james\Documents\volunteer-ops`**. Explore treeLine's export surface in Session 2; if its API doesn't expose what's needed, do NOT reimplement it. Define a thin interface (`src/treeline/adapter.ts`) with a stub implementation, log the gap in `TREELINE-GAPS.md`, note it in BUILD-STATE.md, and continue building against the interface.
+- **Reasoning capture is one sentence per action**, not chain-of-thought. Screenshots/traces only at the moment a finding is flagged — never on every action.
 
 ---
 
-## Session plan
+## Architecture & module map
 
-Sessions are ordered so every session ends with something runnable, and the risky integration points (browser driving, LLM loop, treeLine) land early. Estimated count: 8 build sessions + 1 validation session. If a session goes `PARTIAL`, the next session finishes it before advancing — do not renumber, just note it in BUILD-STATE.md.
+Three tiers per CONTEXT.md — **actor** (drives the browser, one persona/goal at a time), **analyst** (post-hoc cross-session pattern mining), **fixer** (Phase 2, not built). Two execution modes — **discovery** (LLM-reasoning personas, built) and **Stampede** (scripted load replay, not built).
 
-### Session 1 — Repo scaffold, schemas, and SQLite layer
-
-**Goal:** a compiling TypeScript package with every core type defined and a working database layer, so all later sessions build against stable shapes.
-
-- Init the repo: `git init`, `package.json` (single package, MIT license field), `tsconfig.json` (strict), Vitest for tests, ESLint or Biome (pick one, note choice in BUILD-STATE.md), `.gitignore` (include `*.sqlite`, `runs/`, screenshots dir).
-- Create `BUILD-STATE.md`, `GAPS.md`, `TREELINE-GAPS.md` (each with a one-line header explaining its purpose per CONTEXT.md's Learning Loop section).
-- `src/types/` — implement every interface from CONTEXT.md's schema section verbatim: `PersonaArchetype`, `WeightedGoal`, `Goal`, `Checkpoint`, `DomainPack`, `ActionEvent`, plus finding types for the two findings tables and a `SimConfig` type for `sim.config.ts` (target base URL, run dimensions: org size × simulated weeks × session frequency, budget knobs, model routing per tier, concurrency cap defaulting to 1).
-- `src/db/` — SQLite (use `better-sqlite3`) with migrations for: `runs`, `sessions`, `action_events`, `in_session_findings`, `cross_session_findings`, finding status history (`new | still-open | resolved` per run — status history must be queryable so "open for N runs" is a count, per CONTEXT.md). Raw timestamps only; no derived-metric columns.
-- Tests: schema round-trip (insert/read each entity), migration runs clean on empty DB.
-
-**Done means:** `tsc` clean, tests green, all three markdown tracking files exist, BUILD-STATE.md written.
-
-### Session 2 — Browser harness + treeLine adapter (no LLM yet)
-
-**Goal:** a persona-agnostic browser session wrapper that can open the target app, maintain auth, and log `ActionEvent`s to SQLite — driven by a hardcoded script for now.
-
-- `src/browser/` — Playwright wrapper: launch, per-session isolated context, device emulation from `deviceType`, action primitives (click, fill, navigate, read page state) that each emit an `ActionEvent` with raw timestamp.
-- `src/treeline/adapter.ts` — interface + implementation (or stub, per the treeLine dependency rule above) for: session re-seeding via `storageState`, auth-wall detection, `resolveSeedUrl`.
-- Console error and HTTP-failure listeners wired into the event stream (these become in-session findings in Session 3; for now just log them as events).
-- Screenshot capture utility (used later only when findings fire — build the utility, don't wire it to every action).
-- A smoke script (`npm run smoke`) that runs a hardcoded 5–10 action sequence against a configurable URL and writes real events to SQLite. Use any public page or a local static page if Horse Haven staging creds aren't available; do not block on staging access — log it in BUILD-STATE.md if missing.
-
-**Done means:** smoke script produces a SQLite file with a session row and correctly-shaped events; treeLine integration status (real vs. stub) recorded in BUILD-STATE.md and TREELINE-GAPS.md.
-
-### Session 3 — Actor tier: the LLM persona loop
-
-**Goal:** one persona, one goal, driven end-to-end by an LLM.
-
-- `src/actor/` — the perceive → decide → act loop: compact page representation in, next action + one-sentence reasoning out, executed through Session 2's primitives. Structured output (tool use or JSON) — never free-text parsing of actions.
-- Prompt assembly with **prompt caching**: static block (domain pack, archetype, checkpoint schema) cached per session; per-action block kept small.
-- Persona traits actually shape behavior: `patience` bounds retries/waiting, `familiarity` gates whether the treeLine route map is provided as context, `techSavviness` shapes the system prompt.
-- Checkpoint detection: evaluate each `Checkpoint.detector` (define the detector format now — recommend: a string DSL of `url:`, `selector:`, `text:` matchers; document it in the README skeleton) after each action.
-- In-session findings: console error, HTTP 5xx, action budget exhausted before success checkpoint → write to `in_session_findings`, capture screenshot + trace snippet at that moment only.
-- Budget enforcement: token/cost accounting per call; soft per-session cap ends the session gracefully (logged as such, distinct from a hard-stop bug).
-- Model client behind a provider interface (default Anthropic Haiku for actor tier) — swappable per config, honoring `dataPolicy` enforcement (refuse `restricted` + non-approved provider at config-load time).
-- Test with a scripted/mocked LLM for the loop mechanics; one real-model smoke run against the Session 2 target.
-
-**Done means:** a single persona-session runs end-to-end with a real model, events + reasoning land in SQLite, an artificial failure (e.g., impossible checkpoint) produces an in-session finding with screenshot.
-
-### Session 4 — Discovery mode orchestrator
-
-**Goal:** the full multi-persona, simulated-time run.
-
-- `src/orchestrator/` — reads `sim.config.ts` + domain pack; expands org size × simulated weeks × session frequency into a sequential schedule of persona-sessions; per-session weighted goal draw from `goalWeightsByPersona`.
-- Per-session isolation: a hard-stopped session (blocking bug) logs full trace and the batch continues.
-- Hard run-level dollar ceiling: graceful shutdown — finish the in-flight write, mark the run `budget-stopped`, never corrupt state.
-- Teardown sequence: config-declared cleanup hook per domain pack that wipes run-created staging data; runs even after budget-stop or crash (finally-style).
-- Finding status reconciliation across runs: match new findings against prior runs' findings, tag `new | still-open | resolved`. Define the matching key now (recommend: finding type + normalized route + target identifier) and note it in BUILD-STATE.md.
-- CLI entry: `drover run <domain-pack> [--config sim.config.ts]` via a minimal CLI lib (commander or similar).
-
-**Done means:** a small config (2 personas × a few sessions) runs sequentially end-to-end via CLI, produces a populated SQLite run, survives one session being forcibly failed, and teardown executes.
-
-### Session 5 — Analyst tier
-
-**Goal:** cross-session pattern mining after a run completes.
-
-- `src/analyst/` — loads a completed run's sessions/events/findings; builds per-session digests; sends to **Sonnet via the Batch API** (this is post-hoc — no streaming, no real-time path).
-- Targets per CONTEXT.md: duplicate/repetitive labels, routes multiple personas independently stumble on, checkpoints technically reachable but abnormally slow, recurring dead ends. Output shape is a `cross_session_findings` row referencing a *set* of session IDs.
-- Derived metrics computed here from raw timestamps (time-to-first-action, time-stuck) — computed, not stored as schema columns.
-- Structured output contract with validation; malformed analyst output gets logged and skipped, never crashes the pipeline.
-- CLI: `drover analyze <run-id>` (separate command so a run can be re-analyzed without re-simulating).
-- Test with fixture session data + mocked batch responses; one real batch run against Session 4's output.
-
-**Done means:** `drover analyze` on a real run writes cross-session findings with correct session references; batch polling handles the async Batch API lifecycle.
-
-### Session 6 — Reporting
-
-**Goal:** the markdown report — the core deliverable.
-
-- `src/report/` — generates from SQLite (SQLite stays the source of truth; report is a projection).
-- Structure per CONTEXT.md: findings summary table first (severity, type, session count, status), then breakdown by flow. Scannable, not chronological. Include run metadata (config dimensions, cost actuals vs. budget, sessions completed/hard-stopped/budget-capped).
-- Cross-run status comparison via the status tags — a simple "since last run: N new, N still open, N resolved" block, no trend graphs.
-- Findings link to their evidence (screenshot paths, event IDs) rather than inlining everything.
-- CLI: `drover report <run-id> [--out report.md]`.
-- Snapshot tests against fixture data.
-
-**Done means:** a real run from Sessions 4–5 produces a readable report a human could act on; user should be shown a sample and asked for structure feedback before Session 7 (note this in BUILD-STATE.md as a pending user checkpoint — proceed regardless if no feedback by next session).
-
-### Session 7 — Stampede mode
-
-**Goal:** scripted, non-LLM load replay of discovered routes.
-
-- `src/stampede/` — extracts successful route/checkpoint paths from a prior discovery run's event log; replays them as pure Playwright scripts (zero LLM calls) at configurable concurrency with ramp steps.
-- Metrics: p50/p95/p99 response time per route, error rate, degradation as concurrency climbs. Stored in SQLite (own tables), reported via a Stampede section/report reusing Session 6's generator.
-- Distinct CLI command: `drover stampede <run-id> --max-concurrency N [--ramp ...]`.
-- Safety: refuses to run against any URL not explicitly listed as staging in the domain pack; concurrency hard cap in config; same teardown hook applies.
-
-**Done means:** a Stampede run against staging (or a local test server if staging is unavailable — note in BUILD-STATE.md) produces percentile metrics and a report section.
-
-### Session 8 — Domain packs, packaging, README
-
-**Goal:** the open-source surface: examples, docs, and the real Horse Haven pack.
-
-- Ship archetypes in `src/archetypes/`: impatient/rushed, first-timer/cautious, distracted, power-user-on-mobile.
-- Example domain packs in `examples/`: (1) a toy generic app pack (self-contained — include a tiny local demo app it can run against, so adopters can try Drover with zero external setup), (2) the full Horse Haven Ops pack (`dataPolicy: "synthetic-only"`, real roles: volunteer check-in, coordinator adjusting feeding schedule, first-time visitor browsing horses). If Horse Haven goal/checkpoint details are unknown, draft them from the app's staging site and flag them for user review in BUILD-STATE.md.
-- README: what Drover is, quickstart against the toy example, domain pack authoring guide (including the checkpoint detector DSL), **the Data Routing & Privacy section front-and-center** (per CONTEXT.md — adopters must make the `dataPolicy` call knowingly), model routing/cost table, Stampede usage, Phase 2 roadmap.
-- LICENSE (MIT), CHANGELOG stub, `npm pack` sanity check, final lint/test pass.
-
-**Done means:** a stranger could clone the repo, run the toy example end-to-end from the README alone, and author their own domain pack from the guide.
-
-### Session 9 — Validation run + learning-loop pass
-
-**Goal:** prove it on the real target and close the loop.
-
-- Full discovery run against Horse Haven staging with the real domain pack (get staging URL/creds from the user if not already configured — this is the one session that cannot proceed without them).
-- Then `analyze`, `report`, and a small Stampede run. Review output quality: are findings real and actionable? Is the reasoning capture useful? Did budgets behave?
-- File everything learned: Drover shortcomings → `GAPS.md`; treeLine issues hit → `TREELINE-GAPS.md`; report the findings summary to the user.
-- Fix only *harness-breaking* bugs found during validation in this session; quality improvements get logged in GAPS.md as post-v1 work.
-- Mark the build `V1 COMPLETE` in BUILD-STATE.md with a summary of known gaps.
-
-**Done means:** one real end-to-end run exists, its report has been shown to the user, and both gap files reflect what the run taught us.
-
----
-
-## BUILD-STATE.md format (create in Session 1, maintain forever)
-
-```markdown
-# Drover Build State
-Current session: <N> — <DONE | PARTIAL | BLOCKED>
-Next step: <one imperative sentence a fresh model can act on immediately>
-
-## Decisions log
-- <date> S<N>: <decision> — <one-line rationale>   # only decisions CONTEXT.md didn't dictate
-
-## Pending user input
-- <anything waiting on the user, e.g. staging creds, report-format feedback>
-
-## Session history
-- S1 <date>: <status> — <one line of what landed>
 ```
+src/
+  types/          Core schema: PersonaArchetype, WeightedGoal, Goal, Checkpoint, DomainPack,
+                   ActionEvent, finding types, SimConfig, run/session status enums.
+                   Barrel: src/types/index.ts
+  db/              better-sqlite3 layer. database.ts = DroverDb class (all reads/writes),
+                   migrations.ts = schema. Tables: runs, sessions, action_events,
+                   in_session_findings, cross_session_findings, finding_status_history.
+  browser/         Playwright wrapper. session.ts = BrowserSession (per-session isolated
+                   context, device emulation, action primitives, passive console/HTTP-failure
+                   listeners). device.ts = pinned device presets. screenshot.ts = capture
+                   utility (never throws).
+  treeline/        adapter.ts — TreelineAdapter interface, real integration (dynamic import
+                   of the sibling treeLine checkout) + stub fallback.
+  actor/           The perceive→decide→act loop. loop.ts = runPersonaSession (the entry
+                   point). provider.ts = ModelProvider interface + AnthropicModelProvider +
+                   ScriptedModelProvider (test double) + dataPolicy enforcement. prompt.ts =
+                   static/cacheable system block + per-action user block. checkpoint.ts =
+                   detector DSL (url:/selector:/text:). route-map.ts = familiarity-gated
+                   treeLine route context. budget.ts = pricing table + SessionBudget soft-cap.
+                   findings.ts = recordInSessionFinding.
+  matching/        match-key.ts — computeMatchKey/normalizeRoute, the cross-run finding
+                   identity shared by actor findings and orchestrator reconciliation.
+  orchestrator/    schedule.ts = buildSchedule (org size × weeks × frequency → week-major
+                   sequential schedule) + drawWeightedGoal. reconcile.ts =
+                   reconcileRunFindings (new/still-open/resolved tagging). run-discovery.ts =
+                   runDiscovery, the discovery-mode entry point (dataPolicy enforcement,
+                   per-session isolation, budget ceiling, teardown, reconciliation).
+                   config-loader.ts = loadDefaultExport for .ts domain packs/sim configs.
+  analyst/         digest.ts = buildSessionDigest (derived metrics from raw timestamps,
+                   capped action trace). prompt.ts = single-shot analyst prompt. provider.ts =
+                   AnalystProvider interface + BatchAnalystProvider (real Anthropic Batch API
+                   lifecycle) + ScriptedAnalystProvider. validate.ts = structured-output
+                   validation (malformed findings logged + skipped, never crash). analyze.ts =
+                   runAnalyst, the entry point.
+  cli/             index.ts — commander-based CLI. Commands so far: `drover run`,
+                   `drover analyze`.
+  report/          NOT YET BUILT.
+  stampede/        NOT YET BUILT.
+  archetypes/       NOT YET BUILT (ships in examples/ per plan — see CONTEXT.md persona layer).
+```
+
+Barrel exports: each subdirectory has an `index.ts`; `src/index.ts` re-exports the public surface.
+
+---
+
+## Key implementation decisions
+
+These are decisions CONTEXT.md left open that got resolved during the build. Full rationale for each lives in `BUILD-STATE.md`'s decisions log (dated entries) — this is a condensed index by topic. **Read the full entry before changing any of these**, since several have non-obvious reasons.
+
+**Tooling & environment**
+- Linter/formatter: **Biome**, not ESLint (`biome.json` — must include `scripts/**` in `files.includes`, this was a real bug once already).
+- `better-sqlite3` pinned to `^12.11.1` (not v13 — v13 dropped prebuilt binaries and this machine has no MSVC toolchain).
+- Package is ESM (`"type": "module"`), Node >=20, strict TS with `exactOptionalPropertyTypes`.
+- `tsx` is a regular (not dev) dependency — the compiled CLI needs `tsx/esm/api`'s `register()` at runtime to dynamically import a user's `.ts` config files.
+
+**Schema & IDs**
+- IDs are UUIDs (`newId()` in `src/db/database.ts`). Callers supply IDs for every entity *except* action events — `insertActionEvent` generates and returns the id.
+- Both finding tables carry `match_key TEXT NOT NULL`; `finding_status_history` is keyed `(match_key, run_id)` and `recordFindingStatus` is an **upsert**, not insert-only (needed once the analyst tier's second reconciliation pass could hit the same key twice — see the two-phase reconciliation gap below).
+- Run statuses: `running|completed|budget-stopped|crashed`. Session statuses: `running|completed|hard-stopped|budget-capped`. In-session finding types: `console-error|http-failure|action-budget-exhausted|hard-stop`. Cross-session finding types: `duplicate-label|repeated-stumble-route|slow-checkpoint|recurring-dead-end`. All enforced by CHECK constraints — extending any list means a new migration.
+- `ActionEvent.checkpointId` exists in the schema but **is never populated** — the actor loop never passes it when a checkpoint is satisfied. The analyst tier works around this by comparing whole-session durations grouped by goal instead of true per-checkpoint latency. Fix is straightforward if picked up: tag the action right after `evaluateCheckpoints` finds a newly-satisfied checkpoint.
+
+**Cross-run finding matching**
+- Real match key lives in `src/matching/match-key.ts`: `${type}:${normalizedRoute}`, optionally suffixed `:${method}`. `normalizeRoute` strips origin/query/hash — deliberately host-independent so the same route matches across runs even if a dev/staging port changes.
+- Reconciliation scopes "prior runs" to the same `DomainPack.appName`. A match key already `resolved` is left alone on subsequent absent runs (avoids resolved-record spam).
+- Reconciliation is **two-phase**: `runDiscovery` reconciles right after a run finishes (only in-session findings exist yet), and `runAnalyst` reconciles again after cross-session findings are written. This means the console summary `drover run` prints can be transiently wrong for cross-session-finding types until `drover analyze` has also run for that run id — the on-disk table is correct only after both commands run. A future reporting feature should flag runs with no analyst pass yet rather than assume reconciliation is complete.
+
+**Browser / treeLine**
+- treeLine loads via **runtime dynamic import**, not a package.json dependency — `createTreelineAdapter()` imports `../treeLine/packages/acquire/dist/index.js` (override with `DROVER_TREELINE_PATH`), falling back to a stub. `@treeline/acquire` is unpublished; a `file:` dep would break `npm install` for anyone without the sibling checkout. Real integration works when the sibling repo (`C:\Users\james\Documents\treeLine`) is built.
+- Event stream action types: primitives `navigate|click|fill|read-page`; observations `console-error|page-error|http-failure`; `action-error` when a primitive throws.
+- HTTP responses ≥400 are logged as `http-failure` events; only 5xx becomes an in-session *finding*.
+- Device emulation presets are pinned in `src/browser/device.ts` (not Playwright's device registry by name) for stability across Playwright upgrades.
+
+**Actor tier**
+- Default actor model: `claude-haiku-4-5` (`DEFAULT_ACTOR_MODEL` in `src/actor/provider.ts`) — this is the project's own explicit spec from CONTEXT.md's model routing table, not a generic default.
+- `patience`/`techSavviness` traits are treated as **0..1 normalized** (CONTEXT.md doesn't specify a range). `patience` → `maxRetries = round(1 + patience*4)` and `pacingMs = round((1-patience)*500)`. Needs codifying explicitly if/when a domain-pack authoring guide is written, so pack authors don't assume a different scale.
+- Checkpoint detector DSL: `kind:value` — `url:<substring>`, `selector:<css>`, `text:<substring, case-insensitive>` (`src/actor/checkpoint.ts`, documented in `README.md`). Intentionally minimal — no regex, no visibility-vs-presence distinction, no AND/OR combining. Extend the DSL rather than working around it with extra checkpoints if a real domain pack needs more.
+- Structured decision output is a forced Anthropic tool call (`tool_choice: {type:"tool", name:"decide_action"}`) — never free-text parsing.
+- Prompt caching (`cache_control: {type:"ephemeral"}`) applies to the static system block only (domain pack + archetype + checkpoints + optional route map). Below Haiku 4.5's ~4096-token minimum cacheable prefix this silently doesn't cache — fine for the toy example, worth checking once a real domain pack's static block grows.
+- `action-budget-exhausted` only fires when a goal's action budget is genuinely exhausted by the loop's own exit, not when a persona voluntarily gives up early (`outcome: "gave-up"`) — CONTEXT.md's four finding types have no "gave up early" type; a candidate fifth type if real runs show it matters.
+
+**Orchestrator**
+- Schedule iteration is **week-major** (all of week 1 across every simulated org member, before week 2), not persona-major — chosen to more faithfully simulate "an org's activity over N weeks." `orgSize` members are round-robin assigned archetypes from `domainPack.personas`; instance numbers (`p1#1`, `p1#2`, ...) stay stable per member across weeks.
+- Per-session isolation covers two failure shapes identically (session continues as `hard-stopped`, batch continues): the actor loop's own hard-stop, and an exception escaping session setup entirely (counted separately as `sessionsErrored` vs `sessionsHardStopped`). Only an error escaping the *scheduling loop itself* (a config bug, e.g. a schedule referencing a missing goal id) marks the whole run `crashed` — teardown and reconciliation still run first, finally-style.
+- `DomainPack.teardown?: (ctx: DomainPackTeardownContext) => Promise<void>` is a field Session 4 added that isn't in CONTEXT.md's verbatim schema (needed for "wipes everything a run created"). `DomainPackTeardownContext` is just `{ runId, targetBaseUrl }` — Drover has no record of which app-side rows a run actually created, so a pack author's teardown must self-correlate (tag synthetic data with `runId` at fill-time, or sweep by timestamp window). Worth revisiting once a real teardown (Horse Haven pack) is implemented.
+- CLI config/domain-pack loading: plain TS modules with a **default export**, loaded via `loadDefaultExport`.
+
+**Analyst tier**
+- One Batch API call per `drover analyze` invocation, covering every session in the run in a single prompt (not chunked, not per-session). Revisit if a real run's session count makes one prompt unwieldy.
+- `computeCostUsd` doesn't know about Batch API's 50% discount; `BatchAnalystProvider` applies `BATCH_DISCOUNT = 0.5` itself after calling the shared pricing function.
+- Cross-session finding evidence (`screenshotPath`/`traceSnippet`) is **borrowed, not captured** — the analyst has no live browser, so it takes the first available screenshot from any of the finding's referenced sessions' own in-session findings, if one exists. Best-effort; ships without a screenshot otherwise.
+- `drover analyze` requires `--db <path>` (no default, unlike `drover run`) since a run id alone doesn't say which SQLite file it lives in. It does *not* need a `--config` flag — the analyst `ModelRoute` comes from the `Run` row's own stored config snapshot.
+
+---
+
+## Known gaps (see `GAPS.md` and `TREELINE-GAPS.md` for full detail)
+
+Highest-signal ones to know about before extending the codebase:
+
+- No local/self-hosted (Ollama) provider yet — `restricted` domain packs can only run actor-tier on Anthropic today.
+- `SimConfig.concurrencyCap` is inert; setting it > 1 silently does nothing (no error, no concurrency).
+- `ActionEvent.checkpointId` is never populated (see above).
+- No budget enforcement for the analyst tier (cost is reported, not capped).
+- treeLine's auth-wall detection and route-map crawl aren't exported as standalone/reusable surfaces — Drover's adapter re-implements a cheap password-field heuristic and approximates a route map via single-page link scraping instead of a real crawl. See `TREELINE-GAPS.md` for the asks that should eventually become treeLine issues.
+- treeLine is not consumable as a normal npm dependency (unpublished workspace package) — loaded via runtime dynamic import of the sibling checkout's built `dist/`, with a stub fallback if missing/unbuilt.
+
+---
+
+## Running things
+
+```
+npm run build           # tsc
+npm run typecheck       # tsc -p tsconfig.typecheck.json
+npm test                # vitest run
+npm run lint             # biome check src tests scripts
+npm run smoke            # hardcoded browser-only sequence against a fixture site (no LLM)
+npm run smoke:actor      # one real-model persona-session (needs ANTHROPIC_API_KEY)
+npm run smoke:orchestrator  # full CLI subprocess run against the fixture site
+npm run smoke:analyst    # fixture run + real Batch API analyst pass (needs ANTHROPIC_API_KEY)
+npm run drover -- run <domain-pack> [--config sim.config.ts] [--out path]
+npm run drover -- analyze <run-id> --db <path> [--poll-interval-ms <ms>]
+```
+
+`tests/fixtures/site.ts` is a self-contained local fixture site (nav, form, login, dashboard, console-error page, 500 endpoint) — used by both tests and smoke scripts so nothing depends on network access or Horse Haven staging being reachable. `SMOKE_URL=<url>` points smoke scripts at a real target instead.
+
+Repo locations for sibling dependencies:
+- **treeLine**: `C:\Users\james\Documents\treeLine` (pnpm workspace, code under `packages/`).
+- **Horse Haven Ops** (the eventual real target): `C:\Users\james\Documents\volunteer-ops`.
+
+---
+
+## Working conventions
+
+- Keep `BUILD-STATE.md` current: what exists, pending user input (credentials, staging access), and a decisions log entry (with one-line rationale) for anything this file doesn't already dictate.
+- Log Drover's own shortcomings to `GAPS.md` and treeLine-specific limitations to `TREELINE-GAPS.md` as they're found — both are meant to accumulate over the life of the project, not just during initial build-out.
+- Never end a change with a broken build or failing tests — `tsc --noEmit`/`tsc` and `vitest run` clean, `biome check` clean.
+- Prefer scripted/mocked model providers (`ScriptedModelProvider`, `ScriptedAnalystProvider`) for test coverage of loop mechanics; reserve real-model smoke scripts for confirming actual model behavior when credentials are available.
