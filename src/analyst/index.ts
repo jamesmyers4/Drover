@@ -4,6 +4,7 @@ export {
   RunNotFoundError,
   runAnalyst,
 } from "./analyze.js";
+export { AnalystBudgetExceededError, estimateAnalystCostUsd, estimateTokens } from "./budget.js";
 export { buildSessionDigest, type SessionDigest } from "./digest.js";
 export { buildAnalystSystemPrompt, buildAnalystUserPrompt } from "./prompt.js";
 export {
@@ -11,9 +12,11 @@ export {
   type AnalystProvider,
   type AnalystRequest,
   type AnalystResponse,
+  BATCH_DISCOUNT,
   BatchAnalystProvider,
   createAnalystProvider,
   DEFAULT_ANALYST_MODEL,
+  DEFAULT_MAX_TOKENS,
   type RawCrossSessionFinding,
   ScriptedAnalystProvider,
 } from "./provider.js";

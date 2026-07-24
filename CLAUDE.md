@@ -25,7 +25,7 @@ No `ANTHROPIC_API_KEY` has been available in any build environment so far — ev
 - **Never run against production.** Staging with synthetic data only. The Horse Haven target is `volunteer.horsehaventn` staging.
 - **Secrets never enter prompt content.** Auth tokens, cookies, API keys live in the orchestrator's HTTP layer only, regardless of provider. `fill()` primitive values are never written to the event log either (only the selector) — same principle applied one layer deeper.
 - **`dataPolicy` is enforced, not advisory:** `restricted` packs must refuse to run with a non-approved provider configured for the actor tier. Implemented as `assertDataPolicyAllowed` in `src/actor/provider.ts`; approved-provider set for `restricted` is currently just `["anthropic"]` — no local/Ollama provider exists yet (see `GAPS.md`).
-- **Budget knobs are load-bearing:** hard per-run dollar ceiling (graceful shutdown, never dies mid-write — checked *between* sessions, never mid-session) and soft per-persona-session cap. Both implemented. The analyst tier has cost accounting but no enforcement yet (logged gap — low risk since it's one Batch call per `analyze` invocation, not per-session).
+- **Budget knobs are load-bearing:** hard per-run dollar ceiling (graceful shutdown, never dies mid-write — checked *between* sessions, never mid-session) and soft per-persona-session cap. Both implemented. The analyst tier also has an optional hard ceiling (`BudgetConfig.analystCeilingUsd`), enforced as a pre-flight cost *estimate* checked before its single Batch call is sent (`src/analyst/budget.ts`) — a Batch request is billed the instant it's submitted, so there's no mid-call point to cap it at the way `SessionBudget` can for a multi-action session.
 - **Config is typed TypeScript** (`sim.config.ts`), not JSON/YAML. License is MIT. Single package, no monorepo.
 - **Reasoning capture is one sentence per action**, not chain-of-thought. Screenshots/traces only at the moment a finding is flagged — never on every action.
 
@@ -68,8 +68,9 @@ src/
                    capped action trace). prompt.ts = single-shot analyst prompt. provider.ts =
                    AnalystProvider interface + BatchAnalystProvider (real Anthropic Batch API
                    lifecycle) + ScriptedAnalystProvider. validate.ts = structured-output
-                   validation (malformed findings logged + skipped, never crash). analyze.ts =
-                   runAnalyst, the entry point.
+                   validation (malformed findings logged + skipped, never crash). budget.ts =
+                   pre-flight cost estimate + AnalystBudgetExceededError for the optional
+                   analystCeilingUsd hard cap. analyze.ts = runAnalyst, the entry point.
   cli/             index.ts — commander-based CLI. Commands so far: `drover run`,
                    `drover analyze`.
   report/          NOT YET BUILT.
@@ -128,6 +129,7 @@ These are decisions CONTEXT.md left open that got resolved during the build. Ful
 - `computeCostUsd` doesn't know about Batch API's 50% discount; `BatchAnalystProvider` applies `BATCH_DISCOUNT = 0.5` itself after calling the shared pricing function.
 - Cross-session finding evidence (`screenshotPath`/`traceSnippet`) is **borrowed, not captured** — the analyst has no live browser, so it takes the first available screenshot from any of the finding's referenced sessions' own in-session findings, if one exists. Best-effort; ships without a screenshot otherwise.
 - `drover analyze` requires `--db <path>` (no default, unlike `drover run`) since a run id alone doesn't say which SQLite file it lives in. It does *not* need a `--config` flag — the analyst `ModelRoute` comes from the `Run` row's own stored config snapshot.
+- Optional `BudgetConfig.analystCeilingUsd` hard-caps the single Batch call. Enforced pre-flight in `runAnalyst` (`src/analyst/analyze.ts`): `estimateAnalystCostUsd` (`src/analyst/budget.ts`) estimates worst-case cost from prompt character length (chars/4, no real tokenizer) and the request's `max_tokens` ceiling, Batch-discounted the same as the real call — if the estimate exceeds the configured ceiling, `AnalystBudgetExceededError` throws before `provider.analyze()` is ever called, so nothing is billed. Unset ceiling preserves the old uncapped behavior. The estimate is deliberately conservative (biased toward over-, not under-, estimating) since it's a heuristic, not real token counts.
 
 ---
 

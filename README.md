@@ -14,7 +14,7 @@ Two AI tiers currently exist: an **actor** tier that drives a real browser one p
 2. Runs each persona-session **sequentially** (not concurrent — see [Concurrency](#concurrency-not-yet-implemented) below) through a real Playwright browser, driven by an LLM (default `claude-haiku-4-5`) deciding one action at a time against a forced structured tool call — never free-text parsing.
 3. Logs every action (navigate/click/fill/read-page), console errors, page errors, and HTTP failures (≥400) as raw-timestamp events, plus a one-sentence reasoning annotation per action — never full chain-of-thought.
 4. Flags **in-session findings** live: console errors, HTTP 5xx, a checkpoint never reached within budget, or a hard-stop. A screenshot + short trace snippet is captured only at the moment a finding fires.
-5. Enforces a run-level hard dollar ceiling (checked between sessions, never mid-write) and a per-session soft cap (session ends `budget-capped`, not a crash).
+5. Enforces a run-level hard dollar ceiling (checked between sessions, never mid-write) and a per-session soft cap (session ends `budget-capped`, not a crash). `drover analyze`'s single Batch call has its own optional hard ceiling (`budget.analystCeilingUsd`), checked pre-flight against an estimated cost — a Batch call is billed the instant it's submitted, so there's no mid-call point to cap it at.
 6. Tears down anything the run created (via the domain pack's optional `teardown` hook) and reconciles findings against prior runs of the same app (`new` / `still-open` / `resolved`).
 
 **Cross-session analysis** — a separate `drover analyze <run-id>` command loads every session from a completed run, builds a compact digest per session (derived metrics + capped action trace + in-session findings), and sends the whole batch to Sonnet in a single real Anthropic **Batch API** call (50% off, no latency requirement — this is post-hoc analysis). It looks for patterns no single actor session would notice: duplicate dead-end labels, a route several personas independently stumble on, a checkpoint that's technically reachable but abnormally slow. Malformed model output is validated, logged, and skipped — it never crashes the run. Findings are reconciled a second time once written, since cross-session findings don't exist until `analyze` has run (see [Cross-run finding matching](#cross-run-finding-matching) below).
@@ -129,6 +129,7 @@ interface SimConfig {
   budget: {
     runCeilingUsd: number;         // hard ceiling, checked between sessions
     perSessionSoftCapUsd: number;  // soft cap, ends one session gracefully
+    analystCeilingUsd?: number;    // hard ceiling for `drover analyze`'s single Batch call, checked pre-flight
   };
   modelRouting: {
     actor: { provider: string; model: string };

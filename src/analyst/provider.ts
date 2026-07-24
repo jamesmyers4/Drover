@@ -94,9 +94,10 @@ const REPORT_TOOL: Anthropic.Tool = {
 /** Analyst tier default: Sonnet, per CONTEXT.md's model routing table. */
 export const DEFAULT_ANALYST_MODEL = "claude-sonnet-5";
 /** CONTEXT.md "Model routing & cost": Batch API is 50% off list price. */
-const BATCH_DISCOUNT = 0.5;
+export const BATCH_DISCOUNT = 0.5;
 const DEFAULT_POLL_INTERVAL_MS = 5000;
-const DEFAULT_MAX_TOKENS = 4096;
+/** Exported so budget.ts's pre-flight cost estimate uses the same worst-case output ceiling as the real request. */
+export const DEFAULT_MAX_TOKENS = 4096;
 const BATCH_CUSTOM_ID = "run-analysis";
 
 function sleep(ms: number): Promise<void> {

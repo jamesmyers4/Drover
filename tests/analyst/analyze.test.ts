@@ -1,5 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { RunNotFoundError, runAnalyst } from "../../src/analyst/analyze.js";
+import {
+  AnalystBudgetExceededError,
+  RunNotFoundError,
+  runAnalyst,
+} from "../../src/analyst/analyze.js";
 import type { RawCrossSessionFinding } from "../../src/analyst/provider.js";
 import { ScriptedAnalystProvider } from "../../src/analyst/provider.js";
 import { DroverDb, newId } from "../../src/db/database.js";
@@ -254,5 +258,61 @@ describe("runAnalyst", () => {
 
     expect(analystResult.reconciliation).toEqual({ new: 0, stillOpen: 1, resolved: 0 });
     expect(db.getStatusHistory(matchKey).map((h) => h.status)).toEqual(["new", "still-open"]);
+  });
+
+  it("throws AnalystBudgetExceededError and never calls the provider when the pre-flight estimate exceeds analystCeilingUsd", async () => {
+    const tightConfig: SimConfig = {
+      ...config,
+      modelRouting: {
+        ...config.modelRouting,
+        analyst: { provider: "anthropic", model: "claude-sonnet-5" },
+      },
+      budget: { ...config.budget, analystCeilingUsd: 0.0000001 },
+    };
+    const run: Run = {
+      id: newId(),
+      appName,
+      config: tightConfig,
+      status: "completed",
+      startedAt: 1000,
+    };
+    db.insertRun(run);
+    db.insertSession({
+      id: newId(),
+      runId: run.id,
+      personaId: "p0",
+      goalId: "g1",
+      status: "completed",
+      startedAt: 1000,
+      endedAt: 2000,
+    });
+
+    const provider = new ScriptedAnalystProvider([]);
+    const analyzeSpy = vi.spyOn(provider, "analyze");
+
+    await expect(runAnalyst({ db, runId: run.id, provider })).rejects.toThrow(
+      AnalystBudgetExceededError,
+    );
+    expect(analyzeSpy).not.toHaveBeenCalled();
+  });
+
+  it("proceeds normally when analystCeilingUsd is unset", async () => {
+    const { run, sessions } = makeRunWithSessions(1);
+    const s1 = sessions[0];
+    if (!s1) throw new Error("unreachable");
+
+    const provider = new ScriptedAnalystProvider([
+      {
+        type: "recurring-dead-end",
+        severity: "medium",
+        description: "x",
+        sessionIds: [s1.id],
+        route: "/dead-end",
+      },
+    ]);
+    const analyzeSpy = vi.spyOn(provider, "analyze");
+
+    await runAnalyst({ db, runId: run.id, provider });
+    expect(analyzeSpy).toHaveBeenCalledTimes(1);
   });
 });

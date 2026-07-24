@@ -33,6 +33,16 @@ export interface BudgetConfig {
   runCeilingUsd: number;
   /** Soft dollar cap per persona-session. */
   perSessionSoftCapUsd: number;
+  /**
+   * Hard dollar ceiling for the analyst tier's single Batch API call per
+   * `drover analyze` invocation. Checked pre-flight, against an estimate,
+   * before the request is ever sent — a Batch call can't be capped
+   * mid-flight the way a session's per-action loop can, since it's billed
+   * the moment it's submitted. Unset means no analyst-tier cap (existing
+   * behavior).
+   * @default undefined
+   */
+  analystCeilingUsd?: number;
 }
 
 export interface SimConfig {

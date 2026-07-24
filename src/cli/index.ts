@@ -79,6 +79,9 @@ async function analyzeCommand(
     }
 
     console.log(`Analyzing run ${runId} ("${run.appName}")`);
+    if (run.config.budget.analystCeilingUsd !== undefined) {
+      console.log(`  analyst ceiling: $${run.config.budget.analystCeilingUsd}`);
+    }
     const result = await runAnalyst({
       db,
       runId,

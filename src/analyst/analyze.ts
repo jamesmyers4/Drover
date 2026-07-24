@@ -20,10 +20,13 @@ import { newId } from "../db/database.js";
 import { computeMatchKey } from "../matching/match-key.js";
 import { type ReconciliationSummary, reconcileRunFindings } from "../orchestrator/reconcile.js";
 import type { CrossSessionFinding, InSessionFinding } from "../types/index.js";
+import { AnalystBudgetExceededError, estimateAnalystCostUsd } from "./budget.js";
 import { buildSessionDigest } from "./digest.js";
 import { buildAnalystSystemPrompt, buildAnalystUserPrompt } from "./prompt.js";
-import { type AnalystProvider, createAnalystProvider } from "./provider.js";
+import { type AnalystProvider, createAnalystProvider, DEFAULT_MAX_TOKENS } from "./provider.js";
 import { isValidationError, validateRawFinding } from "./validate.js";
+
+export { AnalystBudgetExceededError } from "./budget.js";
 
 export class RunNotFoundError extends Error {
   constructor(runId: string) {
@@ -86,6 +89,22 @@ export async function runAnalyst(opts: RunAnalystOptions): Promise<RunAnalystRes
   if (sessions.length === 0) return emptyResult;
 
   const digests = sessions.map((s) => buildSessionDigest(db, s));
+  const systemPrompt = buildAnalystSystemPrompt();
+  const userPrompt = buildAnalystUserPrompt(digests);
+
+  const ceilingUsd = run.config.budget.analystCeilingUsd;
+  if (ceilingUsd !== undefined) {
+    const estimatedCostUsd = estimateAnalystCostUsd(
+      run.config.modelRouting.analyst.model,
+      systemPrompt,
+      userPrompt,
+      DEFAULT_MAX_TOKENS,
+    );
+    if (estimatedCostUsd > ceilingUsd) {
+      throw new AnalystBudgetExceededError(estimatedCostUsd, ceilingUsd);
+    }
+  }
+
   const provider =
     opts.provider ??
     createAnalystProvider(
@@ -93,10 +112,7 @@ export async function runAnalyst(opts: RunAnalystOptions): Promise<RunAnalystRes
       opts.pollIntervalMs !== undefined ? { pollIntervalMs: opts.pollIntervalMs } : undefined,
     );
 
-  const response = await provider.analyze({
-    systemPrompt: buildAnalystSystemPrompt(),
-    userPrompt: buildAnalystUserPrompt(digests),
-  });
+  const response = await provider.analyze({ systemPrompt, userPrompt });
 
   const knownSessionIds = new Set(sessions.map((s) => s.id));
   let findingsWritten = 0;
