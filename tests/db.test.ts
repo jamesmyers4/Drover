@@ -203,6 +203,44 @@ describe("DroverDb", () => {
     expect(db.countOpenRuns("no-such-key")).toBe(0);
   });
 
+  it("recordFindingStatus upserts on (match_key, run_id) instead of erroring on a second write", () => {
+    const matchKey = "console-error:/broken";
+    const run = makeRun();
+    db.insertRun(run);
+
+    db.recordFindingStatus({
+      matchKey,
+      runId: run.id,
+      findingKind: "in-session",
+      findingId: newId(),
+      status: "new",
+      recordedAt: 1,
+    });
+    // A later reconciliation pass for the same run (e.g. the analyst tier
+    // re-reconciling after cross-session findings land) overwrites the row
+    // in place rather than throwing a primary-key violation.
+    const crossSessionFindingId = newId();
+    db.recordFindingStatus({
+      matchKey,
+      runId: run.id,
+      findingKind: "cross-session",
+      findingId: crossSessionFindingId,
+      status: "still-open",
+      recordedAt: 2,
+    });
+
+    const history = db.getStatusHistory(matchKey);
+    expect(history).toHaveLength(1);
+    expect(history[0]).toEqual({
+      matchKey,
+      runId: run.id,
+      findingKind: "cross-session",
+      findingId: crossSessionFindingId,
+      status: "still-open",
+      recordedAt: 2,
+    });
+  });
+
   it("enforces foreign keys and status check constraints", () => {
     expect(() => db.insertSession(makeSession("nonexistent-run"))).toThrowError(/FOREIGN KEY/);
 

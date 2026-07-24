@@ -11,6 +11,7 @@
 import { mkdirSync } from "node:fs";
 import path from "node:path";
 import { Command } from "commander";
+import { runAnalyst } from "../analyst/analyze.js";
 import { DroverDb } from "../db/database.js";
 import { loadDefaultExport } from "../orchestrator/config-loader.js";
 import { runDiscovery } from "../orchestrator/run-discovery.js";
@@ -66,6 +67,37 @@ async function runCommand(
   }
 }
 
+async function analyzeCommand(
+  runId: string,
+  options: { db: string; pollIntervalMs: string },
+): Promise<void> {
+  const db = new DroverDb(options.db);
+  try {
+    const run = db.getRun(runId);
+    if (!run) {
+      throw new Error(`No run found with id "${runId}" in "${options.db}".`);
+    }
+
+    console.log(`Analyzing run ${runId} ("${run.appName}")`);
+    const result = await runAnalyst({
+      db,
+      runId,
+      pollIntervalMs: Number(options.pollIntervalMs),
+    });
+
+    console.log(`  sessions analyzed:  ${result.sessionsAnalyzed}`);
+    console.log(`  findings written:   ${result.findingsWritten}`);
+    console.log(`  findings skipped:   ${result.findingsSkipped}`);
+    for (const reason of result.skippedReasons) console.log(`    - ${reason}`);
+    console.log(
+      `  findings vs. prior runs: ${result.reconciliation.new} new, ${result.reconciliation.stillOpen} still open, ${result.reconciliation.resolved} resolved`,
+    );
+    console.log(`  cost: $${result.costUsd.toFixed(4)}`);
+  } finally {
+    db.close();
+  }
+}
+
 const program = new Command();
 program
   .name("drover")
@@ -80,6 +112,26 @@ program
   .action(async (domainPackPath: string, options: { config: string; out?: string }) => {
     try {
       await runCommand(domainPackPath, options);
+    } catch (err) {
+      console.error(err instanceof Error ? err.message : err);
+      process.exitCode = 1;
+    }
+  });
+
+program
+  .command("analyze")
+  .description(
+    "Run the analyst tier (cross-session pattern mining) on a completed run. Separate from `run` so a run can be re-analyzed without re-simulating.",
+  )
+  .argument("<run-id>", "id of a previously completed run")
+  .requiredOption(
+    "-d, --db <path>",
+    "path to the run's SQLite file (the --out path from `drover run`)",
+  )
+  .option("--poll-interval-ms <ms>", "Batch API polling interval in milliseconds", "5000")
+  .action(async (runId: string, options: { db: string; pollIntervalMs: string }) => {
+    try {
+      await analyzeCommand(runId, options);
     } catch (err) {
       console.error(err instanceof Error ? err.message : err);
       process.exitCode = 1;

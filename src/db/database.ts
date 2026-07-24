@@ -321,10 +321,24 @@ export class DroverDb {
 
   // --- finding status history ---
 
+  /**
+   * Upsert, not insert-only: the analyst tier (Session 5) reconciles a run a
+   * second time once cross-session findings exist for it (they don't exist
+   * yet when the orchestrator's own post-run reconciliation runs, since the
+   * analyst is a separate, later command) — the second pass must be able to
+   * overwrite the first pass's row for the same (match_key, run_id) rather
+   * than violating its primary key.
+   */
   recordFindingStatus(record: FindingStatusRecord): void {
     this.db
       .prepare(
-        "INSERT INTO finding_status_history (match_key, run_id, finding_kind, finding_id, status, recorded_at) VALUES (?, ?, ?, ?, ?, ?)",
+        `INSERT INTO finding_status_history (match_key, run_id, finding_kind, finding_id, status, recorded_at)
+         VALUES (?, ?, ?, ?, ?, ?)
+         ON CONFLICT(match_key, run_id) DO UPDATE SET
+           finding_kind = excluded.finding_kind,
+           finding_id = excluded.finding_id,
+           status = excluded.status,
+           recorded_at = excluded.recorded_at`,
       )
       .run(
         record.matchKey,
