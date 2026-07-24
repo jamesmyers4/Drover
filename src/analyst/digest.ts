@@ -5,14 +5,15 @@
  * timestamps, never stored as schema columns (CONTEXT.md "Data capture &
  * storage").
  *
- * Note: `ActionEvent.checkpointId` exists in the schema and
- * `BrowserSession`'s primitives accept it, but the Session 3 actor loop
- * never actually passes it when executing an action, so no event has ever
- * recorded which checkpoint it satisfied (see GAPS.md). Lacking true
- * per-checkpoint reach times, `totalDurationMs` grouped by `goalId` is the
- * digest's proxy for "checkpoint technically reachable but abnormally
- * slow" — the analyst compares session durations for the same goal itself
- * rather than us pre-computing outliers.
+ * Note: `ActionEvent.checkpointId` is now populated by the actor loop (it
+ * tags the event whose action newly satisfied a checkpoint — see
+ * `src/actor/loop.ts`), but this digest doesn't consume it yet:
+ * `totalDurationMs` grouped by `goalId` remains the proxy for "checkpoint
+ * technically reachable but abnormally slow," with the analyst comparing
+ * session durations for the same goal itself rather than us pre-computing
+ * outliers. Wiring true per-checkpoint reach times into the digest (would
+ * need goal/checkpoint context this function doesn't currently take) is a
+ * follow-on, not done here.
  */
 
 import type { DroverDb } from "../db/database.js";

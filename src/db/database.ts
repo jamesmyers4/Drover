@@ -182,6 +182,19 @@ export class DroverDb {
     return id;
   }
 
+  /**
+   * Tags an already-inserted event with the checkpoint it satisfied. Needed
+   * because checkpoint satisfaction is only known *after* a primitive's
+   * effect lands on the page, but the event itself is written synchronously
+   * during the primitive call — so this is a follow-up UPDATE, not part of
+   * `insertActionEvent`.
+   */
+  updateActionEventCheckpoint(eventId: string, checkpointId: string): void {
+    this.db
+      .prepare("UPDATE action_events SET checkpoint_id = ? WHERE id = ?")
+      .run(checkpointId, eventId);
+  }
+
   getEventsBySession(sessionId: string): StoredActionEvent[] {
     const rows = this.db
       .prepare("SELECT * FROM action_events WHERE session_id = ? ORDER BY timestamp, id")

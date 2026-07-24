@@ -116,6 +116,25 @@ describe("DroverDb", () => {
     expect(events[1]).toMatchObject(second);
   });
 
+  it("tags an already-inserted action event with a checkpoint via updateActionEventCheckpoint", () => {
+    const run = makeRun();
+    db.insertRun(run);
+    const session = makeSession(run.id);
+    db.insertSession(session);
+
+    const eventId = db.insertActionEvent({
+      sessionId: session.id,
+      timestamp: 1000,
+      actionType: "navigate",
+      target: "/dashboard",
+      reasoning: "Heading to the dashboard.",
+    });
+    expect(db.getEventsBySession(session.id)[0]?.checkpointId).toBeUndefined();
+
+    db.updateActionEventCheckpoint(eventId, "on-dashboard");
+    expect(db.getEventsBySession(session.id)[0]?.checkpointId).toBe("on-dashboard");
+  });
+
   it("round-trips an in-session finding referencing a single event", () => {
     const run = makeRun();
     db.insertRun(run);

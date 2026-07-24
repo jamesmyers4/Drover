@@ -124,6 +124,14 @@ describe("runPersonaSession", () => {
       expect(result.succeeded).toBe(true);
       expect(result.reachedCheckpointIds).toEqual(["on-dashboard"]);
       expect(result.actionsTaken).toBe(2);
+
+      // The navigate that actually landed on /dashboard should be tagged
+      // with the checkpoint it satisfied; nothing before it should be.
+      const events = db.getEventsBySession(sessionId);
+      const dashboardNav = events.find((e) => e.target === `${site.baseUrl}/dashboard`);
+      expect(dashboardNav?.checkpointId).toBe("on-dashboard");
+      const homeNav = events.find((e) => e.target === `${site.baseUrl}/`);
+      expect(homeNav?.checkpointId).toBeUndefined();
     },
     TIMEOUT,
   );

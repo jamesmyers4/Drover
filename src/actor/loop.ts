@@ -54,19 +54,24 @@ interface BrowserSessionLike {
   fill(selector: string, value: string, reasoning: string): Promise<string>;
 }
 
-async function executeAction(session: BrowserSessionLike, decision: ActorDecision): Promise<void> {
+/** Returns the id of the event the primitive logged, or undefined for "finish" (no primitive). */
+async function executeAction(
+  session: BrowserSessionLike,
+  decision: ActorDecision,
+): Promise<string | undefined> {
   switch (decision.actionType) {
     case "navigate":
-      await session.navigate(decision.url as string, decision.reasoning);
-      return;
+      return await session.navigate(decision.url as string, decision.reasoning);
     case "click":
-      await session.click(decision.selector as string, decision.reasoning);
-      return;
+      return await session.click(decision.selector as string, decision.reasoning);
     case "fill":
-      await session.fill(decision.selector as string, decision.value as string, decision.reasoning);
-      return;
+      return await session.fill(
+        decision.selector as string,
+        decision.value as string,
+        decision.reasoning,
+      );
     case "finish":
-      return;
+      return undefined;
   }
 }
 
@@ -209,8 +214,23 @@ export async function runPersonaSession(
           break outer;
         }
 
-        await executeAction(browserSession, decision);
+        const eventId = await executeAction(browserSession, decision);
         stepSucceeded = true;
+
+        if (eventId !== undefined) {
+          // Tag the action that just landed with whichever checkpoint it newly
+          // satisfied, if any — checkpoint state is only knowable after the
+          // action's effect is on the page, so this necessarily happens after
+          // the event was already written. If one action satisfies more than
+          // one checkpoint at once, only the first (goal order) gets the tag;
+          // all of them still count toward `reached`.
+          const nowReached = await evaluateCheckpoints(goal.checkpoints, page);
+          const newlyReached = nowReached.filter((id) => !reached.has(id));
+          if (newlyReached.length > 0) {
+            db.updateActionEventCheckpoint(eventId, newlyReached[0] as string);
+            for (const id of newlyReached) reached.add(id);
+          }
+        }
         break;
       } catch (err) {
         lastErrorMessage = err instanceof Error ? err.message : String(err);
