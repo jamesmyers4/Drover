@@ -1,7 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { DroverDb, newId } from "../../src/db/database.js";
 import { reconcileRunFindings } from "../../src/orchestrator/reconcile.js";
-import type { InSessionFinding, PersonaSession, Run, SimConfig } from "../../src/types/index.js";
+import type {
+  CrossSessionFinding,
+  InSessionFinding,
+  PersonaSession,
+  Run,
+  SimConfig,
+} from "../../src/types/index.js";
 
 const appName = "fixture-app";
 
@@ -157,5 +163,68 @@ describe("reconcileRunFindings", () => {
       stillOpen: 0,
       resolved: 0,
     });
+  });
+
+  function makeRunWithCrossSessionFinding(matchKey: string | undefined): Run {
+    const run: Run = { id: newId(), appName, config, status: "running", startedAt: Date.now() };
+    db.insertRun(run);
+    if (matchKey) {
+      const session: PersonaSession = {
+        id: newId(),
+        runId: run.id,
+        personaId: "p1",
+        goalId: "g1",
+        status: "running",
+        startedAt: Date.now(),
+      };
+      db.insertSession(session);
+      const finding: CrossSessionFinding = {
+        id: newId(),
+        runId: run.id,
+        type: "repeated-stumble-route",
+        severity: "medium",
+        description: "fixture cross-session finding",
+        sessionIds: [session.id],
+        matchKey,
+        createdAt: Date.now(),
+      };
+      db.insertCrossSessionFinding(finding);
+    }
+    return run;
+  }
+
+  it("leaves a prior open cross-session-typed match_key untouched when crossSessionDataComplete is false", () => {
+    const matchKey = "repeated-stumble-route:/schedule/edit";
+
+    const run1 = makeRunWithCrossSessionFinding(matchKey);
+    reconcileRunFindings(db, run1.id, appName);
+
+    // run2: analyst hasn't run yet for this run, so no cross-session findings
+    // exist yet — the post-run call must not mark the still-recurring
+    // cross-session match_key as resolved just because it's absent here.
+    const run2 = makeRunWithCrossSessionFinding(undefined);
+    const summary2 = reconcileRunFindings(db, run2.id, appName, {
+      crossSessionDataComplete: false,
+    });
+    expect(summary2).toEqual({ new: 0, stillOpen: 0, resolved: 0 });
+    expect(db.getStatusHistory(matchKey).map((h) => h.status)).toEqual(["new"]);
+
+    // Once the analyst pass actually runs (crossSessionDataComplete: true)
+    // and the pattern truly wasn't detected again, it's correctly resolved.
+    const summary2b = reconcileRunFindings(db, run2.id, appName);
+    expect(summary2b).toEqual({ new: 0, stillOpen: 0, resolved: 1 });
+    expect(db.getStatusHistory(matchKey).map((h) => h.status)).toEqual(["new", "resolved"]);
+  });
+
+  it("still resolves an absent in-session-typed match_key even when crossSessionDataComplete is false", () => {
+    const matchKey = "console-error:/broken";
+    const run1 = makeRunWithSessionAndFindings([matchKey]);
+    reconcileRunFindings(db, run1.run.id, appName);
+
+    const run2 = makeRunWithSessionAndFindings([]);
+    const summary2 = reconcileRunFindings(db, run2.run.id, appName, {
+      crossSessionDataComplete: false,
+    });
+    expect(summary2).toEqual({ new: 0, stillOpen: 0, resolved: 1 });
   });
 });

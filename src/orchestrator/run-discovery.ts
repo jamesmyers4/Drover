@@ -207,7 +207,9 @@ export async function runDiscovery(opts: RunDiscoveryOptions): Promise<RunDiscov
 
   let reconciliation: ReconciliationSummary = { new: 0, stillOpen: 0, resolved: 0 };
   try {
-    reconciliation = reconcileRunFindings(db, runId, domainPack.appName);
+    reconciliation = reconcileRunFindings(db, runId, domainPack.appName, {
+      crossSessionDataComplete: false,
+    });
   } catch (err) {
     console.error(`[drover] finding reconciliation failed for run ${runId}:`, err);
   }

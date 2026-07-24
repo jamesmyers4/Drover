@@ -7,6 +7,19 @@
  * match_key that was open going into this run but wasn't seen this run gets
  * tagged `resolved`. A match_key already resolved is left alone rather than
  * re-flagged every run it stays absent.
+ *
+ * Called twice per run, at two different points where cross-session finding
+ * data completeness differs (GAPS.md's "two-phase reconciliation" entry):
+ * once by `runDiscovery` right after a run's sessions finish (only
+ * in-session findings exist yet — `drover analyze` hasn't run), and again by
+ * `runAnalyst` after cross-session findings have been written for the run.
+ * A cross-session-typed match_key that's absent from `seenThisRun` during
+ * the first call doesn't mean it's actually resolved — it may just not have
+ * been re-detected yet because the analyst hasn't looked. So the first call
+ * passes `crossSessionDataComplete: false` to leave prior open
+ * cross-session-typed match_keys untouched (neither resolved nor
+ * re-flagged) until the second, fuller call — which is the only one with
+ * real information about whether this run's cross-session findings recur.
  */
 
 import type { DroverDb } from "../db/database.js";
@@ -18,6 +31,20 @@ export interface ReconciliationSummary {
   resolved: number;
 }
 
+export interface ReconcileOptions {
+  /**
+   * Whether this call has complete cross-session finding data for the run
+   * (i.e. `drover analyze` has already run and written this run's
+   * `cross_session_findings`). Defaults to `true` — the common case for a
+   * standalone call. `runDiscovery` explicitly passes `false` for its
+   * post-run call, since at that point cross-session findings for this run
+   * can't exist yet by construction.
+   *
+   * @default true
+   */
+  crossSessionDataComplete?: boolean;
+}
+
 interface SeenFinding {
   kind: "in-session" | "cross-session";
   findingId: string;
@@ -27,7 +54,9 @@ export function reconcileRunFindings(
   db: DroverDb,
   runId: string,
   appName: string,
+  options?: ReconcileOptions,
 ): ReconciliationSummary {
+  const crossSessionDataComplete = options?.crossSessionDataComplete ?? true;
   const now = Date.now();
   const sessions = db.getSessionsByRun(runId);
   const seenThisRun = new Map<string, SeenFinding>();
@@ -62,6 +91,7 @@ export function reconcileRunFindings(
     if (seenThisRun.has(matchKey)) continue;
     const priorLatest = db.getLatestStatusForMatchKeyExcludingRun(appName, matchKey, runId);
     if (!priorLatest || priorLatest.status === "resolved") continue;
+    if (priorLatest.findingKind === "cross-session" && !crossSessionDataComplete) continue;
     db.recordFindingStatus({
       matchKey,
       runId,
