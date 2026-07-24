@@ -19,7 +19,7 @@ No `ANTHROPIC_API_KEY` has been available in any build environment so far — ev
 ## Non-negotiable constraints (from CONTEXT.md — do not re-decide these)
 
 - **Phase 1 scope only.** No fixer tier, no quorum, no auto-promotion of findings, no CI/scheduled runs, no accessibility/visual-drift modules, no installable domain-pack packages. If tempted, log the idea in `GAPS.md` and move on.
-- **Sequential persona execution** is the default and, as built, the *only* implemented path — `SimConfig.concurrencyCap` exists in the type but `runDiscovery` ignores it (logged in `GAPS.md`). Don't silently start honoring it without also validating/rejecting cap > 1 until real concurrency is implemented.
+- **Sequential persona execution** is the default and, as built, the *only* implemented path — `SimConfig.concurrencyCap` exists in the type but `runDiscovery` has no concurrent execution behind it. `runDiscovery` rejects `concurrencyCap > 1` outright (`ConcurrencyNotImplementedError`, checked before the run row is written — same timing as `assertDataPolicyAllowed`) rather than silently honoring it. Don't remove that guard without also implementing real bounded concurrency.
 - **SQLite only** for Drover's data, fully separate from any target app's database.
 - **Zero write access to anything external:** no auto-filed GitHub issues, no writes to the target app's data stores beyond what personas do through the UI, and staging teardown wipes everything a run created.
 - **Never run against production.** Staging with synthetic data only. The Horse Haven target is `volunteer.horsehaventn` staging.
@@ -117,6 +117,7 @@ These are decisions CONTEXT.md left open that got resolved during the build. Ful
 - `action-budget-exhausted` only fires when a goal's action budget is genuinely exhausted by the loop's own exit, not when a persona voluntarily gives up early (`outcome: "gave-up"`) — CONTEXT.md's four finding types have no "gave up early" type; a candidate fifth type if real runs show it matters.
 
 **Orchestrator**
+- `runDiscovery` validates `config.concurrencyCap` before doing anything else (before `db.insertRun`, alongside `assertDataPolicyAllowed`): unset or `1` proceeds normally, anything greater throws `ConcurrencyNotImplementedError` (`src/orchestrator/run-discovery.ts`, exported from the orchestrator barrel). Closes the former "silent no-op" gap — see `CONTEXT.md`'s "Environment & safety" and the removed `GAPS.md` entry.
 - Schedule iteration is **week-major** (all of week 1 across every simulated org member, before week 2), not persona-major — chosen to more faithfully simulate "an org's activity over N weeks." `orgSize` members are round-robin assigned archetypes from `domainPack.personas`; instance numbers (`p1#1`, `p1#2`, ...) stay stable per member across weeks.
 - Per-session isolation covers two failure shapes identically (session continues as `hard-stopped`, batch continues): the actor loop's own hard-stop, and an exception escaping session setup entirely (counted separately as `sessionsErrored` vs `sessionsHardStopped`). Only an error escaping the *scheduling loop itself* (a config bug, e.g. a schedule referencing a missing goal id) marks the whole run `crashed` — teardown and reconciliation still run first, finally-style.
 - `DomainPack.teardown?: (ctx: DomainPackTeardownContext) => Promise<void>` is a field Session 4 added that isn't in CONTEXT.md's verbatim schema (needed for "wipes everything a run created"). `DomainPackTeardownContext` is just `{ runId, targetBaseUrl }` — Drover has no record of which app-side rows a run actually created, so a pack author's teardown must self-correlate (tag synthetic data with `runId` at fill-time, or sweep by timestamp window). Worth revisiting once a real teardown (Horse Haven pack) is implemented.
@@ -135,8 +136,8 @@ These are decisions CONTEXT.md left open that got resolved during the build. Ful
 Highest-signal ones to know about before extending the codebase:
 
 - No local/self-hosted (Ollama) provider yet — `restricted` domain packs can only run actor-tier on Anthropic today.
-- `SimConfig.concurrencyCap` is inert; setting it > 1 silently does nothing (no error, no concurrency).
-- `ActionEvent.checkpointId` is never populated (see above).
+- `SimConfig.concurrencyCap > 1` is rejected (`ConcurrencyNotImplementedError`), not silently honored — but real bounded concurrency still doesn't exist.
+- The analyst tier's digest doesn't yet consume the now-populated `ActionEvent.checkpointId` for true per-checkpoint latency (still uses a whole-session-duration-by-goal proxy).
 - No budget enforcement for the analyst tier (cost is reported, not capped).
 - treeLine's auth-wall detection and route-map crawl aren't exported as standalone/reusable surfaces — Drover's adapter re-implements a cheap password-field heuristic and approximates a route map via single-page link scraping instead of a real crawl. See `TREELINE-GAPS.md` for the asks that should eventually become treeLine issues.
 - treeLine is not consumable as a normal npm dependency (unpublished workspace package) — loaded via runtime dynamic import of the sibling checkout's built `dist/`, with a stub fallback if missing/unbuilt.

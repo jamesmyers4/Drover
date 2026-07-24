@@ -141,7 +141,7 @@ Each finding carries a status tag across runs: `new | still-open | resolved`. Be
 - Runs against a live staging deployment (current dev-stage server), never production
 - Staging data is synthetic/seeded only — enforced by a final teardown sequence that wipes everything the run created before the next one starts
 - Per-session isolation: one persona hitting a blocking bug halts only that session (logged as a hard-stop with full trace), the rest of the batch continues — a blocked session is itself valuable data, not a run-ending failure
-- Sequential execution by default, conservative configurable concurrency cap available but not the default — protects a dev-tier server from the simulation itself becoming the source of noise in the findings
+- Sequential execution by default, conservative configurable concurrency cap available but not the default — protects a dev-tier server from the simulation itself becoming the source of noise in the findings. As built, only the sequential path is implemented; `runDiscovery` rejects a `concurrencyCap` above 1 with a clear error rather than silently ignoring it, until real bounded concurrency exists (see `CLAUDE.md`).
 
 ## Reporting
 

@@ -148,7 +148,7 @@ Actor-tier model choice is a per-domain-pack decision (`dataPolicy`), never a si
 
 ## Concurrency (not yet implemented)
 
-`SimConfig.concurrencyCap` exists in the type, but `runDiscovery` currently ignores it entirely — every persona-session runs sequentially regardless of what a pack author sets. Setting it above 1 today is a silent no-op, not an error and not real concurrency (tracked in `GAPS.md`). Sequential execution is the deliberate v1 default in any case: it avoids parallel LLM-driven browser sessions competing for a dev-tier staging server and keeps cost/behavior easier to reason about.
+`SimConfig.concurrencyCap` exists in the type, but `runDiscovery` only implements the sequential path — every persona-session runs one at a time. Setting `concurrencyCap` above 1 is rejected with a clear `ConcurrencyNotImplementedError` (checked before the run starts), not silently ignored — real bounded concurrency isn't built yet (tracked in `GAPS.md`). Sequential execution is the deliberate v1 default in any case: it avoids parallel LLM-driven browser sessions competing for a dev-tier staging server and keeps cost/behavior easier to reason about.
 
 ## Cross-run finding matching
 

@@ -2,6 +2,10 @@
 
 Drover shortcomings, missing capabilities, and future-improvement ideas, logged as they surface during builds and real runs (per CONTEXT.md's Learning Loop). Entries here are candidates for post-v1 work — log and move on, don't fix out of scope.
 
+## 2026-07-23 (post-S5, GAPS fix) — `concurrencyCap` above 1 is still not real concurrency, just rejected cleanly
+
+Previously logged as "`concurrencyCap` config field has no effect yet" (silent no-op). `runDiscovery` (`src/orchestrator/run-discovery.ts`) now calls `assertConcurrencyCapSupported` before doing anything else — a `concurrencyCap > 1` throws `ConcurrencyNotImplementedError` instead of being silently ignored (same timing/pattern as `assertDataPolicyAllowed`; covered by a new `run-discovery.test.ts` case). This closes the "silent no-op" half of the original gap. What's still open: there is still no actual bounded-concurrency execution path — a pack author who wants real parallelism has no option, only a clear error telling them it isn't built. Post-v1: implement bounded concurrency (a worker-pool-style scheduler over `buildSchedule`'s output, respecting per-session isolation and the run-level budget ceiling) and only then relax the guard.
+
 ## 2026-07-23 (S3) — No local/self-hosted provider for `restricted` domain packs
 
 CONTEXT.md's "Data routing & privacy" names a fully local model (via Ollama) as the zero-exposure actor-tier option for `restricted` domain packs when cost is a concern beyond staying on Anthropic. Session 3 only implements `AnthropicModelProvider`; `assertDataPolicyAllowed`'s approved-provider set for `restricted` packs is just `["anthropic"]` (`src/actor/provider.ts`). Adopters with a real `restricted` app and no Anthropic budget have no provider to route to yet. Post-v1: add an Ollama-backed `ModelProvider` implementation and add `"ollama"` to the approved set once it exists.
@@ -17,10 +21,6 @@ CONTEXT.md's "Data routing & privacy" names a fully local model (via Ollama) as 
 ## 2026-07-23 (S3) — Persona trait numeric range isn't specified in CONTEXT.md
 
 CONTEXT.md types `patience`/`techSavviness` as `number` with no documented range. Session 3 assumed 0..1 normalized (`src/actor/prompt.ts` techSavviness bucketing, `src/actor/loop.ts` patience → retry cap and pacing delay). This needs to be codified explicitly in Session 8's domain-pack authoring guide so pack authors don't guess a different scale (e.g. 1-10).
-
-## 2026-07-23 (S4) — `concurrencyCap` config field has no effect yet
-
-`SimConfig.concurrencyCap` (`src/types/config.ts`) exists per CONTEXT.md's schema, but `runDiscovery` (`src/orchestrator/run-discovery.ts`) only implements the sequential path — every persona-session runs one at a time regardless of what a pack author sets this to. CONTEXT.md frames concurrency as "may exist as config but is not the default path," which Session 4 read as "sequential is the only path to actually build for v1," not "build both and default to sequential." An adopter who sets `concurrencyCap: 4` today gets silent no-op behavior, not an error and not concurrency. Post-v1: either implement bounded concurrency or have config validation reject/warn on a cap > 1 until it's real.
 
 ## 2026-07-23 (S5) — No budget enforcement for the analyst tier
 

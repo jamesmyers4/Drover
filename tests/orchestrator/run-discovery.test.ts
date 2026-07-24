@@ -263,4 +263,45 @@ describe("runDiscovery", () => {
     },
     TIMEOUT,
   );
+
+  it("rejects a concurrencyCap above 1 instead of silently running sequentially", async () => {
+    db = new DroverDb(":memory:");
+
+    const domainPack: DomainPack = {
+      appName: "fixture-app",
+      personas: [
+        {
+          id: "p1",
+          name: "Solo",
+          traits: { patience: 0.5, techSavviness: 0.5, deviceType: "desktop", familiarity: "new" },
+        },
+      ],
+      goals: [
+        {
+          id: "trivial",
+          description: "Finish immediately.",
+          actionBudget: 5,
+          checkpoints: [{ id: "never", description: "Never.", detector: "url:/never-reached" }],
+          successCheckpointId: "never",
+        },
+      ],
+      goalWeightsByPersona: { p1: [{ goalId: "trivial", weight: 1 }] },
+      dataPolicy: "synthetic-only",
+    };
+
+    const config = baseConfig({ targetBaseUrl: site.baseUrl, concurrencyCap: 4 });
+
+    await expect(
+      runDiscovery({
+        db,
+        domainPack,
+        config,
+        screenshotDir: "runs/screenshots-test",
+        browser,
+        treelineAdapter: stubAdapter,
+        disablePacing: true,
+        providerFactory: () => new ScriptedModelProvider([]),
+      }),
+    ).rejects.toThrow(/concurrencyCap/);
+  });
 });

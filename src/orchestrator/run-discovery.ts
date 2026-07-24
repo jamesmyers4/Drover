@@ -62,10 +62,34 @@ export interface RunDiscoveryResult {
   reconciliation: ReconciliationSummary;
 }
 
+/**
+ * `runDiscovery` only ever implements the sequential path (CONTEXT.md
+ * "Execution modes" / CLAUDE.md non-negotiable constraint) — a
+ * `concurrencyCap` above 1 has no real concurrent implementation behind it
+ * yet (see GAPS.md). Silently ignoring it would let a pack author believe
+ * they got parallelism they didn't, so it's rejected outright instead.
+ */
+export class ConcurrencyNotImplementedError extends Error {
+  constructor(cap: number) {
+    super(
+      `SimConfig.concurrencyCap is set to ${cap}, but concurrent execution is not implemented — ` +
+        "runDiscovery only supports sequential execution (concurrencyCap must be 1 or unset). See GAPS.md.",
+    );
+    this.name = "ConcurrencyNotImplementedError";
+  }
+}
+
+function assertConcurrencyCapSupported(concurrencyCap: number | undefined): void {
+  if (concurrencyCap !== undefined && concurrencyCap > 1) {
+    throw new ConcurrencyNotImplementedError(concurrencyCap);
+  }
+}
+
 export async function runDiscovery(opts: RunDiscoveryOptions): Promise<RunDiscoveryResult> {
   const { db, domainPack, config } = opts;
   // Enforced once at config-load time, not per-session (BUILD-STATE.md S3 note for S4).
   assertDataPolicyAllowed(domainPack.dataPolicy, config.modelRouting.actor);
+  assertConcurrencyCapSupported(config.concurrencyCap);
 
   const goalsById = new Map(domainPack.goals.map((g) => [g.id, g]));
   const personasById = new Map(domainPack.personas.map((p) => [p.id, p]));
