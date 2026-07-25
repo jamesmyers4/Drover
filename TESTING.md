@@ -1,110 +1,92 @@
-# Drover Testing Buildout — plan & tracker
+# Drover Testing — status snapshot
 
-This file is the plan *and* the running tracker for bringing Drover's test
-infrastructure up to the same maturity treeLine's reached (see "What treeLine
-had" below, adapted from that repo's now-deleted `TESTING-treeLine.md`, which
-this file replaces). Read `CLAUDE.md` and `CONTEXT.md` first, same as any
-other work in this repo — this file assumes the constraints and module map
-those two already establish and doesn't repeat them.
+Drover's test infrastructure buildout (Sessions 1–4, historical plan and
+decisions log preserved below) is done. This section is a snapshot of what
+exists and how to use it, not a forward-looking plan — same shape treeLine's
+own `TESTING.md` settled into once its buildout finished. Read `CLAUDE.md`
+and `CONTEXT.md` first, same as any other work in this repo.
 
-**How to use this file:** it's broken into sessions, one per Claude Code
-run, the same pattern `BUILD-STATE.md` uses for feature work. Each session:
-read this file, do the "Next step" session's work (and only that session —
-don't start the next one early), update the "Current session / Next step"
-line and add a dated entry under "Decisions log" for anything non-obvious
-that came up, then stop. The user reviews and commits manually between
-sessions and restarts Claude Code for the next one.
+## What exists
 
-**Current session: 4 — Wire into CI, close the loop**
-**Next step:** Work through Session 4 below. Do not start any further
-session beyond it in the same run.
+- **Unit/integration tests** — 18 files, 118 tests (`vitest run` / `npm
+  test`, current as of 2026-07-24 — trust a fresh `npm test` run's own
+  summary over this number if it's drifted). Real coverage, not
+  placeholder: `tests/fixtures/site.ts` is a local `node:http` fixture
+  server that browser-driven tests launch real Playwright chromium
+  against. `ScriptedModelProvider`/`ScriptedAnalystProvider` stand in for
+  the real Anthropic SDK in loop/orchestrator/analyst tests so those
+  suites run with no API key and no network dependency;
+  `tests/actor/provider.test.ts` and `tests/analyst/provider.test.ts`
+  separately mock the `@anthropic-ai/sdk` module itself to cover the
+  real-provider code paths (request shaping, cost computation, malformed-
+  output handling) without live calls. Session 2's constraint-coverage
+  audit confirmed every one of `CLAUDE.md`'s non-negotiable constraints has
+  a findable test (or a documented structural guarantee where a test would
+  just re-assert a type signature) — see that session's decisions-log entry
+  below for the item-by-item disposition.
+- **Golden-master pipeline tests** — `tests/golden/`: `normalize-golden.ts`
+  (strips ephemeral fixture-server ports and UUID-shaped values before
+  comparison), `dump-run.ts` (flattens a `runDiscovery` call's DB rows into
+  a stable, sorted shape — primitive actions only, passive observation
+  events excluded since their relative arrival order is a genuine runtime
+  race, not meaningful signal), `golden-file.ts` (diffable string
+  comparison, not `toEqual`), and 3 locked scenarios in
+  `run-discovery.golden.test.ts` (clean run, mixed outcomes, budget-
+  stopped), each driven directly through `runDiscovery` against the real
+  fixture browser with `ScriptedModelProvider`. Regenerate with
+  `UPDATE_GOLDEN=1 npm test` after an intentional behavior change. A 4th
+  scenario locking down `drover analyze`'s cross-session output is
+  deliberately deferred until Session 6's reporting work gives it a real
+  consumer — see that session's plan entry below.
+- **CI** — `.github/workflows/test.yml` runs on every push/PR to `main`:
+  checkout, Node 20 (`actions/setup-node`, built-in `cache: npm`), `npm
+  ci`, `npx playwright install --with-deps chromium`, then `typecheck` →
+  `build` → `lint` → `test`, on `ubuntu-latest`, no matrix. Runs with no
+  `ANTHROPIC_API_KEY` set — expected and confirmed clean, since every test
+  that touches a model either uses a scripted provider or mocks the SDK
+  module directly. The golden suite needs no separate CI step: it's just
+  more `*.test.ts` files under `tests/`, picked up by the same `npm test`
+  (`vitest run`) invocation everything else runs under — there's no
+  `vitest.config.*` narrowing the default file glob, confirmed by its
+  absence from the repo. A status badge linking to the workflow is at the
+  top of `README.md`.
 
----
+## How to reproduce locally
 
-## Baseline: what already exists (no session needed)
+```bash
+npm ci
+npx playwright install --with-deps chromium   # first time, or to match CI exactly
+npm run typecheck
+npm run build
+npm run lint
+npm test                        # includes the golden suite, no separate command
+UPDATE_GOLDEN=1 npm test         # regenerate golden files after an intentional behavior change
+```
 
-Unlike treeLine at the point its own testing buildout started, Drover
-already has a real unit/integration test layer — this isn't a from-scratch
-effort, it's closing two specific gaps on top of an existing foundation:
+## Deliberately out of scope
 
-- 19 test files under `tests/`, ~110+ tests (exact count drifts — trust
-  `npm test`'s own summary over any number written here), run via `vitest
-  run`. Real coverage, not placeholder: `tests/fixtures/site.ts` is a local
-  `node:http` fixture server (nav, form, login, console-error page, 500
-  endpoint) that browser-driven tests launch real Playwright chromium
-  against — same "real browser, real local server, no mocked Playwright"
-  posture treeLine's unit layer has. `ScriptedModelProvider` /
-  `ScriptedAnalystProvider` stand in for the real Anthropic SDK in loop/
-  orchestrator/analyst tests so those suites run with no API key and no
-  network dependency; `tests/actor/provider.test.ts` and
-  `tests/analyst/provider.test.ts` separately mock the `@anthropic-ai/sdk`
-  module itself to cover the real-provider code paths (request shaping,
-  cost computation, malformed-output handling) without live calls.
-- `npm run typecheck`, `npm run build`, `npm run lint` (Biome) all pass
-  clean today per `CLAUDE.md`'s working conventions — this buildout must
-  not regress that.
-- Three real-model smoke scripts (`smoke:actor`, `smoke:orchestrator`,
-  `smoke:analyst`) already exist and already play the role treeLine's
-  `packages/verify` played: manual, on-demand, needs a live credential
-  (`ANTHROPIC_API_KEY`), not CI-gated, and never will be — see "No verify
-  analog" below. Nothing to build here, just noting the parallel.
-
-What's actually missing, and what this file's sessions close:
-
-1. **No CI** — nothing runs `npm test`/`typecheck`/`lint` automatically on
-   push or PR. Every check today is manual.
-2. **No golden-master / full-pipeline layer** — every existing test proves
-   an individual module's behavior in isolation (a checkpoint detector, a
-   budget calculation, one orchestrator scenario at a time). Nothing proves
-   the *whole* `drover run` → SQLite → `drover analyze` pipeline produces
-   stable, correct end-to-end output the way a unit test can't by
-   construction — the same gap treeLine's `packages/cli/test/` golden files
-   closed for its crawl pipeline.
-
----
-
-## What treeLine had, and how Drover's plan differs
-
-treeLine's testing buildout (documented in the file this one replaces) had
-three layers: per-package unit/fixture tests, a golden-master pipeline
-layer, and `packages/verify` (a manual live-target verification tool). The
-plan below adapts the first two; the third has no analog here, on purpose:
-
-- **Unit/fixture tests** — already done in Drover (see Baseline above). No
-  session needed; Session 2 below only *audits* this layer against
-  `CLAUDE.md`'s non-negotiable constraints rather than rebuilding it.
-- **Golden-master pipeline tests** — the real gap, Session 3 below.
-  Adapted, not copied: treeLine's golden output is generated *code*
-  (Playwright POMs/specs) and *markdown reports*, so it had to exclude
-  `test/golden/**` from vitest's own test-file glob to stop it importing
-  `@playwright/test` inside a checked-in spec fixture. Drover has no
-  code-generation output — a full pipeline run produces SQLite rows and an
-  optional screenshot, not source files — so that specific gotcha doesn't
-  apply here. What *does* carry over directly: normalizing nondeterministic
-  values (UUIDs, wall-clock timestamps, ephemeral fixture-server ports)
-  before comparing against a checked-in golden file, and the
-  `UPDATE_GOLDEN=1`-to-regenerate convention.
-- **No `packages/verify` analog** — treeLine's `verify` tool existed to
-  answer one specific question against a real, live authenticated target:
-  "does this nav link's real destination match what the crawl recorded?"
-  Drover has no equivalent artifact needing that kind of external
-  verification — its analogous "does this behave correctly against a real
-  model" question is already answered by the three existing smoke scripts.
-  Nothing to build; not a session below. If a real Horse Haven Ops run (S9
-  in `BUILD-STATE.md`'s numbering) later surfaces a class of question that
+- **No `packages/verify` analog** — treeLine's `verify` tool answered "does
+  this nav link's real destination match what the crawl recorded?" against
+  a live authenticated target. Drover's analogous "does this behave
+  correctly against a real model" question is already answered by the
+  three existing real-model smoke scripts (`smoke:actor`,
+  `smoke:orchestrator`, `smoke:analyst`) — manual, on-demand, needs a live
+  `ANTHROPIC_API_KEY`, not CI-gated, and not planned to become one. If a
+  real Horse Haven Ops run later surfaces a class of question that
   genuinely needs live/manual verification the smoke scripts don't cover,
-  log it in `GAPS.md` when it happens rather than speculating about it now.
-- **CI** — treeLine's CI needed Xvfb because `launchHardened` hardcodes
-  `headless: false` with no test-time override. Drover's
-  `launchBrowser()` (`src/browser/session.ts`) defaults `headless: true`
-  (`chromium.launch({ headless: options?.headless ?? true })`), and no
-  Drover test overrides it — confirmed by reading the code before writing
-  this, not assumed. **No Xvfb needed in Drover's CI.** Still needs a
-  `playwright install` step for the chromium binary itself, and Session 1
-  should confirm (not assume) that `better-sqlite3@^12.11.1`'s prebuilt
-  binary installs cleanly on the CI runner's OS/Node combination, same
-  "verify, don't assume" discipline treeLine's own CI session used for its
-  Xvfb requirement.
+  that's a new `GAPS.md` entry when it happens, not something to build
+  preemptively.
+- **No Xvfb** — `launchBrowser()` (`src/browser/session.ts`) defaults
+  `headless: true` and nothing overrides it, confirmed by reading the code
+  during Session 1, not assumed.
+- **No OS/Node matrix, no separate Playwright-browser cache step** — v1
+  CI scope, matching `CLAUDE.md`'s "Phase 1 scope only" discipline applied
+  to test tooling.
+
+## Historical record
+
+Everything below (Sessions 1–4's plan text and the dated decisions log) is
+kept as-is from the buildout for reference — not a live plan to re-run.
 
 ---
 
@@ -494,3 +476,40 @@ network-failure console logging behavior, not on Drover's.
   matches vitest's default test-file glob same as every other suite.
 - Test count went from 115 to 118 (3 new golden scenarios); file count from
   17 to 18. `npm run typecheck`/`build`/`lint`/`test` all clean.
+
+**2026-07-24 (Session 4 — Wire into CI, close the loop)** — Confirmed,
+didn't assume: re-read `.github/workflows/test.yml` (Session 1's file,
+unchanged) and `package.json`'s `test` script (`vitest run`, no
+`vitest.config.*` anywhere in the repo narrowing the default file glob) —
+Session 3's `tests/golden/run-discovery.golden.test.ts` matches vitest's
+default `*.test.ts` pattern same as every other suite, so it's already
+running inside CI's existing `npm test` step. No new CI step needed; none
+added. Ran `npm test` fresh to get a current, non-estimated count for this
+file's new status snapshot: 18 files / 118 tests, all passing.
+
+Asked the user whether to add a CI status badge to `README.md` (per this
+session's own "ask rather than assuming" instruction) — yes. Added a
+GitHub Actions badge for the `test` workflow (`jamesmyers4/Drover`) at the
+top of `README.md`, linking to the Actions page.
+
+Rewrote this file's top section (everything that used to sit above
+"Session 1") into the status snapshot above, replacing the old
+forward-looking "Baseline" / "What treeLine had" framing — the per-session
+plan text and this decisions log are kept below as historical record, per
+this session's own instruction, rather than deleted. `BUILD-STATE.md` was
+not touched, per this session's "done means" — testing infra and feature
+build sessions stay tracked separately.
+
+No new residual gaps surfaced during this session worth a `GAPS.md` entry
+— Sessions 1–3's work was already correctly wired (CI already ran
+everything under `npm test` including the golden suite; nothing was
+silently disconnected). The one deferred item already on record — a 4th
+golden scenario for `drover analyze`'s cross-session output, waiting on
+Session 6's reporting consumer — is test-infrastructure scope, not a
+product/behavior gap, so it stays documented here (Session 3's plan entry
+and this file's new status snapshot) rather than duplicated into
+`GAPS.md`, consistent with this file's own test-infra-vs-`GAPS.md` split.
+
+Testing buildout (Sessions 1–4) is now complete. Stopping here per this
+session's scope — Session 5 (`BUILD-STATE.md`'s next feature session,
+reporting) is out of scope for this file's work and was not started.

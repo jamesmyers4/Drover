@@ -1,5 +1,7 @@
 # Drover
 
+[![test](https://github.com/jamesmyers4/Drover/actions/workflows/test.yml/badge.svg)](https://github.com/jamesmyers4/Drover/actions/workflows/test.yml)
+
 Drover is an open-source, config-driven simulation harness that runs AI-driven personas through a web app to surface bugs, confusing flows, and performance problems — the messy, unscripted issues that scripted tests don't catch because nobody predicted them. Point it at any web app via a **domain pack**; Horse Haven Ops (`volunteer.horsehaventn`) is the first real target and reference implementation.
 
 Two AI tiers currently exist: an **actor** tier that drives a real browser one persona-session at a time (perceive → decide → act, LLM-reasoned), and an **analyst** tier that mines patterns across a completed run's sessions after the fact. A **fixer** tier (auto-proposing code fixes) is explicitly Phase 2 and not part of this codebase yet. See `CONTEXT.md` for the full product spec and `CLAUDE.md` for the as-built architecture map — this README is the practical entry point.
