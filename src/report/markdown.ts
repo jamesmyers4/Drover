@@ -6,7 +6,7 @@
  * not duplicated into every table row.
  */
 
-import type { FindingReportRow, RunReport } from "./report.js";
+import type { FindingReportRow, RunReport, StampedeRunReportSection } from "./report.js";
 
 function formatDate(epochMs: number): string {
   return new Date(epochMs).toISOString();
@@ -44,6 +44,36 @@ function evidenceAppendix(rows: FindingReportRow[]): string {
       return lines.join("\n");
     })
     .join("\n\n");
+}
+
+function formatErrorRate(errorCount: number, sampleCount: number): string {
+  if (sampleCount === 0) return "0.0%";
+  return `${((errorCount / sampleCount) * 100).toFixed(1)}%`;
+}
+
+function stampedeRunSection(run: StampedeRunReportSection): string {
+  const header = `### Stampede run \`${run.stampedeRunId}\` — concurrency levels ${run.concurrencyLevels.join(", ")}`;
+  const meta =
+    `Started: ${formatDate(run.startedAt)}  \n` +
+    `Ended: ${run.endedAt !== undefined ? formatDate(run.endedAt) : "_in progress_"}`;
+  if (run.results.length === 0) {
+    return [header, meta, "_No route results recorded._"].join("\n\n");
+  }
+  const tableHeader =
+    "| Route | Concurrency | Samples | Errors | Error rate | p50 (ms) | p95 (ms) | p99 (ms) |\n" +
+    "| --- | --- | --- | --- | --- | --- | --- | --- |";
+  const tableBody = run.results.map(
+    (r) =>
+      `| ${escapeCell(r.route)} | ${r.concurrency} | ${r.sampleCount} | ${r.errorCount} | ${formatErrorRate(r.errorCount, r.sampleCount)} | ${r.p50Ms.toFixed(0)} | ${r.p95Ms.toFixed(0)} | ${r.p99Ms.toFixed(0)} |`,
+  );
+  return [header, meta, [tableHeader, ...tableBody].join("\n")].join("\n\n");
+}
+
+function stampedeSection(runs: StampedeRunReportSection[]): string {
+  if (runs.length === 0) {
+    return "_No Stampede (load test) runs recorded against this discovery run._";
+  }
+  return runs.map(stampedeRunSection).join("\n\n");
 }
 
 export function renderMarkdownReport(report: RunReport): string {
@@ -100,6 +130,10 @@ export function renderMarkdownReport(report: RunReport): string {
       `- ${report.reconciliation.stillOpen} still open`,
       `- ${report.reconciliation.resolved} resolved`,
     ].join("\n"),
+  );
+
+  sections.push(
+    ["## Load test results (Stampede)", stampedeSection(report.stampedeRuns)].join("\n\n"),
   );
 
   sections.push(["## Evidence", evidenceAppendix(report.findings)].join("\n\n"));

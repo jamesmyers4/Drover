@@ -15,6 +15,12 @@
  * into the run and simply wasn't seen this time, so there's no current-run
  * finding row to attach the tag to. Those still count toward
  * `reconciliation.resolved`, just not toward any row in `findings`.
+ *
+ * `stampedeRuns` folds in every `drover stampede` run recorded against this
+ * discovery run (GAPS.md: previously console-output-only) — looked up by
+ * `source_run_id`, since a discovery run's routes can be replayed more than
+ * once. Purely additive: Stampede has no findings/status/cost concerns of
+ * its own to merge into the rest of this report.
  */
 
 import type { DroverDb } from "../db/database.js";
@@ -24,6 +30,7 @@ import type {
   FindingStatus,
   RunDimensions,
   RunStatus,
+  StampedeRouteResult,
 } from "../types/index.js";
 
 /** Named distinctly from the analyst tier's own RunNotFoundError so both can be re-exported from the top-level barrel without colliding. */
@@ -52,6 +59,16 @@ export interface FindingReportRow {
   evidence: EvidenceRef;
 }
 
+/** One `drover stampede` invocation against this discovery run, with its per-route results. */
+export interface StampedeRunReportSection {
+  stampedeRunId: string;
+  startedAt: number;
+  endedAt?: number;
+  concurrencyLevels: number[];
+  /** Route-then-concurrency sorted, same order `getStampedeRouteResultsByRun` already returns. */
+  results: StampedeRouteResult[];
+}
+
 export interface RunReport {
   runId: string;
   appName: string;
@@ -69,6 +86,8 @@ export interface RunReport {
   findings: FindingReportRow[];
   /** The same rows, grouped by every Goal.id any contributing session belongs to (a row can appear under more than one goal). */
   findingsByFlow: Record<string, FindingReportRow[]>;
+  /** Every `drover stampede` run against this discovery run, oldest first. Empty if Stampede was never run against it. */
+  stampedeRuns: StampedeRunReportSection[];
 }
 
 const SEVERITY_RANK: Record<FindingSeverity, number> = {
@@ -159,6 +178,16 @@ export function buildRunReport(db: DroverDb, runId: string): RunReport {
     else if (status === "resolved") reconciliation.resolved++;
   }
 
+  const stampedeRuns: StampedeRunReportSection[] = db
+    .getStampedeRunsBySourceRun(runId)
+    .map((stampedeRun) => ({
+      stampedeRunId: stampedeRun.id,
+      startedAt: stampedeRun.startedAt,
+      ...(stampedeRun.endedAt !== undefined && { endedAt: stampedeRun.endedAt }),
+      concurrencyLevels: stampedeRun.concurrencyLevels,
+      results: db.getStampedeRouteResultsByRun(stampedeRun.id),
+    }));
+
   return {
     runId: run.id,
     appName: run.appName,
@@ -173,5 +202,6 @@ export function buildRunReport(db: DroverDb, runId: string): RunReport {
     reconciliation,
     findings,
     findingsByFlow,
+    stampedeRuns,
   };
 }

@@ -3,7 +3,10 @@
  * process against the fixture site (or SMOKE_URL) — Stampede's "Done means"
  * bar: given a completed discovery run's recorded routes, a real subprocess
  * replays them at increasing concurrency and writes per-route percentile/
- * error rows.
+ * error rows. Also runs `drover report` afterward and checks its stdout for
+ * the "Load test results (Stampede)" section (GAPS.md: folding Stampede
+ * results into the report), since this is the one place a real CLI
+ * subprocess chain proves the two commands actually compose end to end.
  *
  * Unlike every other smoke script, this one needs no ANTHROPIC_API_KEY at
  * all — Stampede has no LLM calls anywhere in it (CONTEXT.md: "no reasoning,
@@ -135,6 +138,18 @@ async function main(): Promise<void> {
     } finally {
       verifyDb.close();
     }
+
+    const reportResult = await runCli(["report", sourceRunId, "--db", dbPath]);
+    if (reportResult.code !== 0) {
+      throw new Error(`drover report exited with code ${reportResult.code}`);
+    }
+    if (!reportResult.stdout.includes("## Load test results (Stampede)")) {
+      throw new Error("drover report's output did not include the Stampede results section.");
+    }
+    if (!reportResult.stdout.includes(stampedeRunId)) {
+      throw new Error("drover report's Stampede section did not reference this stampede run id.");
+    }
+    console.log("Verified drover report folds this stampede run's results in.");
   } finally {
     await site?.close();
     console.log(`Wrote ${dbPath}`);

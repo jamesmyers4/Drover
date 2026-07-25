@@ -166,4 +166,11 @@ export const migrations: Migration[] = [
       CREATE INDEX idx_in_session_findings_match ON in_session_findings(match_key);
     `,
   },
+  {
+    version: 6,
+    name: "stampede-runs-source-index",
+    sql: `
+      CREATE INDEX idx_stampede_runs_source ON stampede_runs(source_run_id);
+    `,
+  },
 ];

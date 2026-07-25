@@ -144,6 +144,62 @@ describe("buildRunReport", () => {
     expect(report.findingsByFlow["schedule-edit"]).toHaveLength(1);
   });
 
+  it("reports no stampede runs for a discovery run Stampede was never replayed against", () => {
+    const run: Run = { id: newId(), appName, config, status: "completed", startedAt: 1000 };
+    db.insertRun(run);
+
+    const report = buildRunReport(db, run.id);
+    expect(report.stampedeRuns).toEqual([]);
+  });
+
+  it("folds in every stampede run recorded against this discovery run, oldest first, with its route results", () => {
+    const run: Run = { id: newId(), appName, config, status: "completed", startedAt: 1000 };
+    db.insertRun(run);
+
+    const laterStampedeId = newId();
+    db.insertStampedeRun({
+      id: laterStampedeId,
+      sourceRunId: run.id,
+      targetBaseUrl: config.targetBaseUrl,
+      concurrencyLevels: [1, 5],
+      startedAt: 5000,
+    });
+    db.updateStampedeRunEnded(laterStampedeId, 5500);
+
+    const earlierStampedeId = newId();
+    db.insertStampedeRun({
+      id: earlierStampedeId,
+      sourceRunId: run.id,
+      targetBaseUrl: config.targetBaseUrl,
+      concurrencyLevels: [1],
+      startedAt: 2000,
+    });
+    db.updateStampedeRunEnded(earlierStampedeId, 2200);
+    db.insertStampedeRouteResult({
+      id: newId(),
+      stampedeRunId: earlierStampedeId,
+      route: "/dashboard",
+      concurrency: 1,
+      sampleCount: 3,
+      errorCount: 0,
+      p50Ms: 100,
+      p95Ms: 120,
+      p99Ms: 130,
+      recordedAt: 2100,
+    });
+
+    const report = buildRunReport(db, run.id);
+    expect(report.stampedeRuns).toHaveLength(2);
+    expect(report.stampedeRuns.map((s) => s.stampedeRunId)).toEqual([
+      earlierStampedeId,
+      laterStampedeId,
+    ]);
+    expect(report.stampedeRuns[0]?.results).toHaveLength(1);
+    expect(report.stampedeRuns[0]?.results[0]).toMatchObject({ route: "/dashboard", p50Ms: 100 });
+    expect(report.stampedeRuns[0]?.endedAt).toBe(2200);
+    expect(report.stampedeRuns[1]?.results).toEqual([]);
+  });
+
   it("sorts findings by severity, then type, then match key", () => {
     const run: Run = { id: newId(), appName, config, status: "completed", startedAt: 1000 };
     db.insertRun(run);

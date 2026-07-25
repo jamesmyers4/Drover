@@ -524,6 +524,24 @@ export class DroverDb {
     this.db.prepare("UPDATE stampede_runs SET ended_at = ? WHERE id = ?").run(endedAt, id);
   }
 
+  private mapStampedeRunRow(row: {
+    id: string;
+    source_run_id: string | null;
+    target_base_url: string;
+    concurrency_levels_json: string;
+    started_at: number;
+    ended_at: number | null;
+  }): StampedeRun {
+    return {
+      id: row.id,
+      ...(row.source_run_id !== null && { sourceRunId: row.source_run_id }),
+      targetBaseUrl: row.target_base_url,
+      concurrencyLevels: JSON.parse(row.concurrency_levels_json) as number[],
+      startedAt: row.started_at,
+      ...(row.ended_at !== null && { endedAt: row.ended_at }),
+    };
+  }
+
   getStampedeRun(id: string): StampedeRun | undefined {
     const row = this.db.prepare("SELECT * FROM stampede_runs WHERE id = ?").get(id) as
       | {
@@ -535,15 +553,22 @@ export class DroverDb {
           ended_at: number | null;
         }
       | undefined;
-    if (!row) return undefined;
-    return {
-      id: row.id,
-      ...(row.source_run_id !== null && { sourceRunId: row.source_run_id }),
-      targetBaseUrl: row.target_base_url,
-      concurrencyLevels: JSON.parse(row.concurrency_levels_json) as number[],
-      startedAt: row.started_at,
-      ...(row.ended_at !== null && { endedAt: row.ended_at }),
-    };
+    return row ? this.mapStampedeRunRow(row) : undefined;
+  }
+
+  /** Every stampede run recorded against a discovery run, oldest first — a discovery run can be replayed more than once. */
+  getStampedeRunsBySourceRun(sourceRunId: string): StampedeRun[] {
+    const rows = this.db
+      .prepare("SELECT * FROM stampede_runs WHERE source_run_id = ? ORDER BY started_at")
+      .all(sourceRunId) as {
+      id: string;
+      source_run_id: string | null;
+      target_base_url: string;
+      concurrency_levels_json: string;
+      started_at: number;
+      ended_at: number | null;
+    }[];
+    return rows.map((row) => this.mapStampedeRunRow(row));
   }
 
   insertStampedeRouteResult(result: StampedeRouteResult): void {

@@ -42,6 +42,7 @@ function makeReport(overrides?: Partial<RunReport>): RunReport {
       "schedule-edit": [],
       "check-in": [],
     },
+    stampedeRuns: [],
     ...overrides,
   };
 }
@@ -69,5 +70,45 @@ describe("renderMarkdownReport", () => {
       status: "running",
     });
     expectMatchesGolden("report-empty", renderMarkdownReport(report));
+  });
+
+  it("matches the golden snapshot for a run with Stampede load test results folded in", () => {
+    const report = makeReport({
+      stampedeRuns: [
+        {
+          stampedeRunId: "stampede-1",
+          startedAt: 1_700_000_100_000,
+          endedAt: 1_700_000_160_000,
+          concurrencyLevels: [1, 5, 10],
+          results: [
+            {
+              id: "r1",
+              stampedeRunId: "stampede-1",
+              route: "/dashboard",
+              concurrency: 1,
+              sampleCount: 3,
+              errorCount: 0,
+              p50Ms: 120,
+              p95Ms: 140,
+              p99Ms: 150,
+              recordedAt: 1_700_000_110_000,
+            },
+            {
+              id: "r2",
+              stampedeRunId: "stampede-1",
+              route: "/dashboard",
+              concurrency: 10,
+              sampleCount: 30,
+              errorCount: 3,
+              p50Ms: 480,
+              p95Ms: 900,
+              p99Ms: 1200,
+              recordedAt: 1_700_000_150_000,
+            },
+          ],
+        },
+      ],
+    });
+    expectMatchesGolden("report-with-stampede", renderMarkdownReport(report));
   });
 });
