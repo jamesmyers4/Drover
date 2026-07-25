@@ -61,6 +61,15 @@ export class MalformedDecisionError extends Error {
   }
 }
 
+/**
+ * Soft cap on `reasoning`, not a hard schema rejection — CLAUDE.md's "one
+ * sentence per action" is a prompt-adherence convention, and a model that
+ * drifts into a longer explanation shouldn't crash the session over it
+ * (GAPS.md). `maxLength` here is a hint to the model; `parseDecision` is what
+ * actually enforces it, by truncating rather than throwing.
+ */
+export const MAX_REASONING_LENGTH = 200;
+
 const DECIDE_TOOL: Anthropic.Tool = {
   name: "decide_action",
   description:
@@ -70,7 +79,8 @@ const DECIDE_TOOL: Anthropic.Tool = {
     properties: {
       reasoning: {
         type: "string",
-        description: "One short first-person sentence: why you're doing this next.",
+        maxLength: MAX_REASONING_LENGTH,
+        description: `One short first-person sentence: why you're doing this next. Keep it under ${MAX_REASONING_LENGTH} characters.`,
       },
       actionType: {
         type: "string",
@@ -113,6 +123,10 @@ function parseDecision(input: unknown): ActorDecision {
   if (typeof obj.reasoning !== "string" || !obj.reasoning.trim()) {
     throw new DecisionParseError("missing or empty 'reasoning'");
   }
+  const reasoning =
+    obj.reasoning.length > MAX_REASONING_LENGTH
+      ? `${obj.reasoning.slice(0, MAX_REASONING_LENGTH - 1)}…`
+      : obj.reasoning;
   if (
     obj.actionType !== "navigate" &&
     obj.actionType !== "click" &&
@@ -121,7 +135,7 @@ function parseDecision(input: unknown): ActorDecision {
   ) {
     throw new DecisionParseError(`invalid actionType "${String(obj.actionType)}"`);
   }
-  const decision: ActorDecision = { reasoning: obj.reasoning, actionType: obj.actionType };
+  const decision: ActorDecision = { reasoning, actionType: obj.actionType };
   if (typeof obj.url === "string") decision.url = obj.url;
   if (typeof obj.selector === "string") decision.selector = obj.selector;
   if (typeof obj.value === "string") decision.value = obj.value;

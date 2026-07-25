@@ -21,6 +21,7 @@ const {
   DataPolicyViolationError,
   DEFAULT_ACTOR_MODEL,
   MalformedDecisionError,
+  MAX_REASONING_LENGTH,
   ScriptedModelProvider,
 } = await import("../../src/actor/provider.js");
 
@@ -119,6 +120,47 @@ describe("AnthropicModelProvider malformed decisions still report billed usage",
 
     expect(result.decision.actionType).toBe("navigate");
     expect(result.usage.costUsd).toBeGreaterThan(0);
+  });
+});
+
+describe("reasoning length is capped by truncation, not rejection", () => {
+  it("passes a short reasoning string through unchanged", async () => {
+    mockCreate.mockResolvedValueOnce({
+      content: [
+        {
+          type: "tool_use",
+          name: "decide_action",
+          input: { reasoning: "go home", actionType: "navigate", url: "https://example.test" },
+        },
+      ],
+      usage: BASE_USAGE,
+    });
+    const provider = new AnthropicModelProvider(DEFAULT_ACTOR_MODEL);
+
+    const result = await provider.decide({ systemPrompt: "s", userPrompt: "u" });
+
+    expect(result.decision.reasoning).toBe("go home");
+  });
+
+  it("truncates an over-long reasoning string instead of throwing MalformedDecisionError", async () => {
+    const longReasoning = "a".repeat(MAX_REASONING_LENGTH + 50);
+    mockCreate.mockResolvedValueOnce({
+      content: [
+        {
+          type: "tool_use",
+          name: "decide_action",
+          input: { reasoning: longReasoning, actionType: "navigate", url: "https://example.test" },
+        },
+      ],
+      usage: BASE_USAGE,
+    });
+    const provider = new AnthropicModelProvider(DEFAULT_ACTOR_MODEL);
+
+    const result = await provider.decide({ systemPrompt: "s", userPrompt: "u" });
+
+    expect(result.decision.reasoning.length).toBe(MAX_REASONING_LENGTH);
+    expect(result.decision.reasoning.endsWith("…")).toBe(true);
+    expect(result.decision.reasoning.startsWith("a".repeat(MAX_REASONING_LENGTH - 1))).toBe(true);
   });
 });
 
