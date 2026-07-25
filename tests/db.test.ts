@@ -94,6 +94,32 @@ describe("DroverDb", () => {
     expect(db.getRun(run.id)).toEqual({ ...run, status: "budget-stopped", endedAt });
   });
 
+  it("omits actorCostUsd/analystCostUsd from a round-tripped run when never set", () => {
+    const run = makeRun();
+    db.insertRun(run);
+    const fetched = db.getRun(run.id);
+    expect(fetched).not.toHaveProperty("actorCostUsd");
+    expect(fetched).not.toHaveProperty("analystCostUsd");
+  });
+
+  it("updateRunActorCost overwrites the recorded actor spend", () => {
+    const run = makeRun();
+    db.insertRun(run);
+    db.updateRunActorCost(run.id, 1.25);
+    expect(db.getRun(run.id)?.actorCostUsd).toBe(1.25);
+    db.updateRunActorCost(run.id, 2.5);
+    expect(db.getRun(run.id)?.actorCostUsd).toBe(2.5);
+  });
+
+  it("updateRunAnalystCost accumulates across multiple `drover analyze` passes", () => {
+    const run = makeRun();
+    db.insertRun(run);
+    db.updateRunAnalystCost(run.id, 0.1);
+    expect(db.getRun(run.id)?.analystCostUsd).toBeCloseTo(0.1);
+    db.updateRunAnalystCost(run.id, 0.2);
+    expect(db.getRun(run.id)?.analystCostUsd).toBeCloseTo(0.3);
+  });
+
   it("round-trips a session", () => {
     const run = makeRun();
     db.insertRun(run);
@@ -279,6 +305,46 @@ describe("DroverDb", () => {
       status: "still-open",
       recordedAt: 2,
     });
+  });
+
+  it("getStatusHistoryForRun returns only this run's status records, in recorded order", () => {
+    const matchKey = "http-failure:/api/schedule:POST";
+    const otherMatchKey = "console-error:/broken";
+    const runA = makeRun();
+    const runB = makeRun();
+    db.insertRun(runA);
+    db.insertRun(runB);
+
+    db.recordFindingStatus({
+      matchKey,
+      runId: runA.id,
+      findingKind: "in-session",
+      findingId: newId(),
+      status: "new",
+      recordedAt: 1,
+    });
+    db.recordFindingStatus({
+      matchKey: otherMatchKey,
+      runId: runA.id,
+      findingKind: "in-session",
+      findingId: newId(),
+      status: "still-open",
+      recordedAt: 2,
+    });
+    db.recordFindingStatus({
+      matchKey,
+      runId: runB.id,
+      findingKind: "in-session",
+      findingId: newId(),
+      status: "new",
+      recordedAt: 1,
+    });
+
+    const history = db.getStatusHistoryForRun(runA.id);
+    expect(history).toHaveLength(2);
+    expect(history.every((h) => h.runId === runA.id)).toBe(true);
+    expect(history.map((h) => h.matchKey)).toEqual([matchKey, otherMatchKey]);
+    expect(db.getStatusHistoryForRun("no-such-run")).toEqual([]);
   });
 
   it("enforces foreign keys and status check constraints", () => {

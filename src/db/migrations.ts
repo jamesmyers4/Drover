@@ -100,4 +100,12 @@ export const migrations: Migration[] = [
       ALTER TABLE runs ADD COLUMN checkpoint_context_json TEXT;
     `,
   },
+  {
+    version: 3,
+    name: "run-cost-actuals",
+    sql: `
+      ALTER TABLE runs ADD COLUMN actor_cost_usd REAL;
+      ALTER TABLE runs ADD COLUMN analyst_cost_usd REAL;
+    `,
+  },
 ];

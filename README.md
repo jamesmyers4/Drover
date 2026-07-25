@@ -6,7 +6,7 @@ Drover is an open-source, config-driven simulation harness that runs AI-driven p
 
 Two AI tiers currently exist: an **actor** tier that drives a real browser one persona-session at a time (perceive → decide → act, LLM-reasoned), and an **analyst** tier that mines patterns across a completed run's sessions after the fact. A **fixer** tier (auto-proposing code fixes) is explicitly Phase 2 and not part of this codebase yet. See `CONTEXT.md` for the full product spec and `CLAUDE.md` for the as-built architecture map — this README is the practical entry point.
 
-**Status:** Sessions 1–5 of the build are done (types/DB, browser harness, actor tier, discovery orchestrator, analyst tier). Not yet built: markdown reporting, Stampede (scripted load-replay) mode, example domain packs, and the real Horse Haven Ops pack. See `BUILD-STATE.md` for exact status and `GAPS.md` for known blind spots.
+**Status:** Sessions 1–6 of the build are done (types/DB, browser harness, actor tier, discovery orchestrator, analyst tier, markdown reporting). Not yet built: Stampede (scripted load-replay) mode, example domain packs, and the real Horse Haven Ops pack. See `BUILD-STATE.md` for exact status and `GAPS.md` for known blind spots.
 
 ## What it does today
 
@@ -21,7 +21,9 @@ Two AI tiers currently exist: an **actor** tier that drives a real browser one p
 
 **Cross-session analysis** — a separate `drover analyze <run-id>` command loads every session from a completed run, builds a compact digest per session (derived metrics + capped action trace + in-session findings), and sends them to Sonnet via the real Anthropic **Batch API** (50% off, no latency requirement — this is post-hoc analysis). Digests are split into groups of at most `--sessions-per-chunk` (default 25) sessions, each its own concurrent Batch request, rather than one prompt covering every session — keeps a large run's prompt size bounded, at the cost of only correlating patterns *within* a chunk (a pattern spanning two sessions in different chunks would be missed; see [Concurrency](#concurrency) for the analogous trade-off on the actor-tier side). It looks for patterns no single actor session would notice: duplicate dead-end labels, a route several personas independently stumble on, a checkpoint that's technically reachable but abnormally slow. Malformed model output is validated, logged, and skipped — it never crashes the run. Findings are reconciled a second time once written, since cross-session findings don't exist until `analyze` has run (see [Cross-run finding matching](#cross-run-finding-matching) below).
 
-Not built yet: a `drover report` command that turns the SQLite data into a markdown report, and Stampede mode (scripted, non-reasoning load replay of discovered routes).
+**Reporting** — `drover report <run-id> --db <path> [--out report.md]` reads a run's SQLite data (no re-simulation, no re-analysis) and builds a markdown report: a findings summary table (severity, type, session count, status), the same findings broken out by flow (`Goal.id`), run metadata (config dimensions, actual actor/analyst spend vs. budget), and a "since last run" new/still-open/resolved count. Findings from both tables merge into one row per `matchKey`; each row links to its evidence (screenshot paths, event ids) in a separate appendix rather than inlining it. Prints to stdout without `--out`. Surfaces a warning when `drover analyze` hasn't run yet for the run, since cross-session findings/status may be incomplete until it has.
+
+Not built yet: Stampede mode (scripted, non-reasoning load replay of discovered routes).
 
 ## Quickstart
 
@@ -43,6 +45,7 @@ There is no example domain pack shipped yet (`examples/` is Session 8 scope), so
 export ANTHROPIC_API_KEY=sk-...
 npm run drover -- run ./my-domain-pack.ts --config ./sim.config.ts --out ./runs/run1.sqlite
 npm run drover -- analyze <run-id> --db ./runs/run1.sqlite
+npm run drover -- report <run-id> --db ./runs/run1.sqlite --out ./runs/report1.md
 ```
 
 `npm run smoke:actor`, `smoke:orchestrator`, and `smoke:analyst` exercise the actor loop, the full orchestrator (as a real CLI subprocess), and the analyst's Batch API lifecycle respectively — the first and third need `ANTHROPIC_API_KEY` and print a clear skip message and exit 0 without it; `smoke:orchestrator` runs regardless (every session just hard-stops on the missing key, which itself exercises per-session isolation).
@@ -176,11 +179,12 @@ Reconciliation is **two-phase**: `drover run` reconciles right after a run finis
 ```
 drover run <domain-pack> [--config sim.config.ts] [--out path]
 drover analyze <run-id> --db <path> [--poll-interval-ms <ms>] [--sessions-per-chunk <n>]
+drover report <run-id> --db <path> [--out report.md]
 ```
 
 - `<domain-pack>` and `--config` are paths to local TypeScript modules with a default export (a `DomainPack` and `SimConfig` respectively). `--out` defaults to `runs/<timestamp>.sqlite`.
 - `drover analyze` requires `--db <path>` (no default — a run id alone doesn't say which SQLite file it lives in) and does *not* take a `--config` flag; it reads the analyst model route from the run's own stored config snapshot. `--sessions-per-chunk` defaults to 25 — see [Cross-session analysis](#what-it-does-today) above.
-- `drover report` does not exist yet (Session 6 scope).
+- `drover report` also requires `--db <path>`, same reasoning as `analyze`. Without `--out`, the markdown report prints to stdout; with it, the report is written to that file path instead.
 
 ## Repo layout
 
@@ -194,8 +198,8 @@ src/
   matching/      Cross-run finding match-key computation
   orchestrator/  Discovery-mode scheduling, weighted goal draw, reconciliation, run-discovery entry point
   analyst/       Post-hoc cross-session pattern mining via the Batch API
-  cli/           `drover run` / `drover analyze` commands
-  report/        Not yet built
+  cli/           `drover run` / `drover analyze` / `drover report` commands
+  report/        Markdown findings report generation from a run's SQLite data
   stampede/      Not yet built
 ```
 

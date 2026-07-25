@@ -203,6 +203,9 @@ export async function runAnalyst(opts: RunAnalystOptions): Promise<RunAnalystRes
 
   const reconciliation = reconcileRunFindings(db, runId, run.appName);
 
+  const costUsd = responses.reduce((sum, r) => sum + r.usage.costUsd, 0);
+  db.updateRunAnalystCost(runId, costUsd);
+
   return {
     runId,
     sessionsAnalyzed: sessions.length,
@@ -210,6 +213,6 @@ export async function runAnalyst(opts: RunAnalystOptions): Promise<RunAnalystRes
     findingsSkipped: skippedReasons.length,
     skippedReasons,
     reconciliation,
-    costUsd: responses.reduce((sum, r) => sum + r.usage.costUsd, 0),
+    costUsd,
   };
 }

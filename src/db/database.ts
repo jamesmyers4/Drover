@@ -67,7 +67,7 @@ export class DroverDb {
   insertRun(run: Run): void {
     this.db
       .prepare(
-        "INSERT INTO runs (id, app_name, config_json, status, started_at, ended_at, checkpoint_context_json) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO runs (id, app_name, config_json, status, started_at, ended_at, checkpoint_context_json, actor_cost_usd, analyst_cost_usd) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
       )
       .run(
         run.id,
@@ -77,6 +77,8 @@ export class DroverDb {
         run.startedAt,
         run.endedAt ?? null,
         run.checkpointContext !== undefined ? JSON.stringify(run.checkpointContext) : null,
+        run.actorCostUsd ?? null,
+        run.analystCostUsd ?? null,
       );
   }
 
@@ -84,6 +86,18 @@ export class DroverDb {
     this.db
       .prepare("UPDATE runs SET status = ?, ended_at = ? WHERE id = ?")
       .run(status, endedAt ?? null, id);
+  }
+
+  /** Overwrites the run's recorded actor-tier spend (one `drover run` invocation per run row, so this is a plain set, not additive). */
+  updateRunActorCost(id: string, costUsd: number): void {
+    this.db.prepare("UPDATE runs SET actor_cost_usd = ? WHERE id = ?").run(costUsd, id);
+  }
+
+  /** Adds to the run's recorded analyst-tier spend — a run can be re-analyzed via `drover analyze`, and each pass bills real additional cost. */
+  updateRunAnalystCost(id: string, costUsd: number): void {
+    this.db
+      .prepare("UPDATE runs SET analyst_cost_usd = COALESCE(analyst_cost_usd, 0) + ? WHERE id = ?")
+      .run(costUsd, id);
   }
 
   getRun(id: string): Run | undefined {
@@ -96,6 +110,8 @@ export class DroverDb {
           started_at: number;
           ended_at: number | null;
           checkpoint_context_json: string | null;
+          actor_cost_usd: number | null;
+          analyst_cost_usd: number | null;
         }
       | undefined;
     if (!row) return undefined;
@@ -112,6 +128,8 @@ export class DroverDb {
           CheckpointContextEntry
         >,
       }),
+      ...(row.actor_cost_usd !== null && { actorCostUsd: row.actor_cost_usd }),
+      ...(row.analyst_cost_usd !== null && { analystCostUsd: row.analyst_cost_usd }),
     };
   }
 
@@ -381,6 +399,28 @@ export class DroverDb {
         "SELECT * FROM finding_status_history WHERE match_key = ? ORDER BY recorded_at, rowid",
       )
       .all(matchKey) as {
+      match_key: string;
+      run_id: string;
+      finding_kind: FindingStatusRecord["findingKind"];
+      finding_id: string;
+      status: FindingStatusRecord["status"];
+      recorded_at: number;
+    }[];
+    return rows.map((row) => ({
+      matchKey: row.match_key,
+      runId: row.run_id,
+      findingKind: row.finding_kind,
+      findingId: row.finding_id,
+      status: row.status,
+      recordedAt: row.recorded_at,
+    }));
+  }
+
+  /** Every match_key this specific run recorded a reconciliation status for (Session 6 — `drover report` needs "current run's status per finding", not full cross-run history). */
+  getStatusHistoryForRun(runId: string): FindingStatusRecord[] {
+    const rows = this.db
+      .prepare("SELECT * FROM finding_status_history WHERE run_id = ? ORDER BY recorded_at, rowid")
+      .all(runId) as {
       match_key: string;
       run_id: string;
       finding_kind: FindingStatusRecord["findingKind"];

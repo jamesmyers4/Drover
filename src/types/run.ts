@@ -33,6 +33,20 @@ export interface Run {
    * layer unchanged.
    */
   checkpointContext?: Record<string, CheckpointContextEntry>;
+  /**
+   * Actual actor-tier spend for this run, recorded once the run finishes
+   * (Session 6 — reporting needs a real "cost actuals vs. budget" number,
+   * and the in-memory `RunDiscoveryResult.totalCostUsd` a `drover run`
+   * invocation returns doesn't survive to a later, separate `drover report`
+   * process). Absent until the run ends.
+   */
+  actorCostUsd?: number;
+  /**
+   * Cumulative analyst-tier spend across every `drover analyze` invocation
+   * for this run (a run can be re-analyzed, and each pass is real
+   * additional spend). Absent until the first `drover analyze` completes.
+   */
+  analystCostUsd?: number;
 }
 
 export type SessionStatus = "running" | "completed" | "hard-stopped" | "budget-capped";

@@ -8,9 +8,9 @@ Also read `BUILD-STATE.md` (current status, decisions log, pending user input) a
 
 ## Build status
 
-Sessions 1–5 of the original build plan are done: core types + SQLite layer, browser harness + treeLine adapter, the actor tier (LLM persona loop), the discovery-mode orchestrator, and the analyst tier (cross-session pattern mining). See `BUILD-STATE.md` for the authoritative, up-to-date status, the full decisions log, and the exact next step.
+Sessions 1–6 of the original build plan are done: core types + SQLite layer, browser harness + treeLine adapter, the actor tier (LLM persona loop), the discovery-mode orchestrator, the analyst tier (cross-session pattern mining), and markdown reporting. See `BUILD-STATE.md` for the authoritative, up-to-date status, the full decisions log, and the exact next step.
 
-**Not yet built:** reporting (`src/report/`, markdown report generation + `drover report` CLI), Stampede mode (`src/stampede/`, scripted load replay), the example domain packs and README quickstart (`examples/`, full README), the real Horse Haven Ops domain pack, and a validation run against Horse Haven staging. These map to the original plan's Session 6–9 scope. Treat CONTEXT.md's relevant sections ("Reporting," "Stampede mode," "Open source packaging") as the spec for that work when it's picked up.
+**Not yet built:** Stampede mode (`src/stampede/`, scripted load replay), the example domain packs and README quickstart (`examples/`), the real Horse Haven Ops domain pack, and a validation run against Horse Haven staging. These map to the original plan's Session 7–9 scope. Treat CONTEXT.md's relevant sections ("Stampede mode," "Open source packaging") as the spec for that work when it's picked up.
 
 No `ANTHROPIC_API_KEY` has been available in any build environment so far — every real-model code path (actor tier, analyst tier's Batch API) is implemented and covered by scripted/mocked tests, but has never been exercised against a live model. The smoke scripts (`npm run smoke:actor`, `smoke:orchestrator`, `smoke:analyst`) detect the missing key and skip gracefully rather than failing. Run them with a real key before trusting real-model behavior.
 
@@ -72,8 +72,13 @@ src/
                    pre-flight cost estimate + AnalystBudgetExceededError for the optional
                    analystCeilingUsd hard cap. analyze.ts = runAnalyst, the entry point.
   cli/             index.ts — commander-based CLI. Commands so far: `drover run`,
-                   `drover analyze`.
-  report/          NOT YET BUILT.
+                   `drover analyze`, `drover report`.
+  report/          buildRunReport (merges in-session + cross-session findings by
+                   match_key into one row per finding, joined against this run's
+                   own finding_status_history) + renderMarkdownReport (findings
+                   summary table, breakdown by flow, run metadata/cost actuals,
+                   since-last-run counts, evidence appendix). Reads only the
+                   SQLite file — no re-simulation, no re-analysis.
   stampede/        NOT YET BUILT.
   archetypes/       NOT YET BUILT (ships in examples/ per plan — see CONTEXT.md persona layer).
 ```
@@ -133,6 +138,15 @@ These are decisions CONTEXT.md left open that got resolved during the build. Ful
 - `drover analyze` requires `--db <path>` (no default, unlike `drover run`) since a run id alone doesn't say which SQLite file it lives in. It does *not* need a `--config` flag — the analyst `ModelRoute` comes from the `Run` row's own stored config snapshot.
 - Optional `BudgetConfig.analystCeilingUsd` hard-caps the single Batch call. Enforced pre-flight in `runAnalyst` (`src/analyst/analyze.ts`): `estimateAnalystCostUsd` (`src/analyst/budget.ts`, now `async`) counts input tokens via Anthropic's real, free `messages.countTokens` endpoint (`createApiTokenCounter`) — the exact `system`+`messages` shape the real Batch request sends, not a proxy — and the request's `max_tokens` ceiling for output, Batch-discounted the same as the real call. If the estimate exceeds the configured ceiling, `AnalystBudgetExceededError` throws before `provider.analyze()` is ever called, so nothing is billed. Unset ceiling preserves the old uncapped behavior. A `TokenCounter` is injectable (default param) so tests/offline runs can avoid a real network call; any failure of the real API path (missing credentials, offline) falls back to the old chars/4 heuristic (`estimateTokens`) rather than blocking the gate — see `GAPS.md` for what's still unverified against a live API.
 
+**Reporting tier**
+- `Run` gained `actorCostUsd`/`analystCostUsd` (`src/types/run.ts`, migration 3, `src/db/migrations.ts`) — the report needs a real "cost actuals vs. budget" number, and the in-memory `RunDiscoveryResult.totalCostUsd`/`RunAnalystResult.costUsd` a `drover run`/`drover analyze` invocation returns doesn't survive to a later, separate `drover report` process reading only the SQLite file. `actorCostUsd` is a plain overwrite (`DroverDb.updateRunActorCost`, called once at the end of `runDiscovery` — one `drover run` invocation per run row). `analystCostUsd` is additive (`DroverDb.updateRunAnalystCost`, `SET analyst_cost_usd = COALESCE(analyst_cost_usd, 0) + ?`) since a run can be re-analyzed via multiple `drover analyze` invocations, each billing real additional cost — the stored value is the cumulative analyst spend across all of them, not just the most recent pass.
+- `buildRunReport` (`src/report/report.ts`) merges `in_session_findings` and `cross_session_findings` into one row per `matchKey` — safe because the two finding-type enums never overlap (`computeMatchKey` embeds the type in the key), so an in-session and a cross-session finding can never collide on the same key. A row's `status` comes from this run's own `finding_status_history` record (new `DroverDb.getStatusHistoryForRun(runId)`, filtered by `run_id` rather than `match_key` — the existing `getStatusHistory`/`getLatestStatusForMatchKeyExcludingRun` queries are both matchKey-first, wrong shape for "every status this run recorded"). A `resolved` status record can exist for this run without any corresponding row in `findings` — reconciliation writes `resolved` when a match_key was open going into the run and simply wasn't seen this time, so there's nothing to attach the tag to in this run's own finding tables; `reconciliation.resolved` still counts it, just not as a `findings` row.
+- "Breakdown by flow" groups by `Goal.id`: an in-session finding's goal comes from its originating session; a cross-session finding is attributed to every goal any of its `sessionIds` belongs to (can appear under more than one flow if its sessions ran different goals).
+- `hasAnalystPass` (`RunReport`) is derived from `run.analystCostUsd !== undefined`, not from whether `cross_session_findings` rows exist — a real analyst pass that finds nothing still shouldn't be reported as "no analyst pass yet" (GAPS.md's S5 entry asked for exactly this surfacing).
+- The report's own `RunNotFoundError` is named `ReportRunNotFoundError` (`src/report/report.ts`) — the analyst tier already exports a `RunNotFoundError` from its own barrel, and both barrels are re-exported via `export *` from the top-level `src/index.ts`, so the plain name would collide (`tsc` catches this at build time, not just at import-site usage).
+- Findings link to evidence (screenshot paths, event ids) in a separate "Evidence" appendix section rather than inlining screenshots/trace text into the summary tables (CONTEXT.md "Visual evidence": keep captured evidence exactly where you'd look for it, not duplicated into every row).
+- `drover report` takes the same `--db <path>`-required, no-`--config` pattern `drover analyze` already established, for the same reason (a run id alone doesn't say which SQLite file it lives in; the report needs nothing from a live domain pack or sim config file). No `--out` prints the markdown to stdout instead of writing a file.
+
 ---
 
 ## Known gaps (see `GAPS.md` and `TREELINE-GAPS.md` for full detail)
@@ -161,6 +175,7 @@ npm run smoke:orchestrator  # full CLI subprocess run against the fixture site
 npm run smoke:analyst    # fixture run + real Batch API analyst pass (needs ANTHROPIC_API_KEY)
 npm run drover -- run <domain-pack> [--config sim.config.ts] [--out path]
 npm run drover -- analyze <run-id> --db <path> [--poll-interval-ms <ms>]
+npm run drover -- report <run-id> --db <path> [--out report.md]
 ```
 
 `tests/fixtures/site.ts` is a self-contained local fixture site (nav, form, login, dashboard, console-error page, 500 endpoint) — used by both tests and smoke scripts so nothing depends on network access or Horse Haven staging being reachable. `SMOKE_URL=<url>` points smoke scripts at a real target instead.

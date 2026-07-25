@@ -8,13 +8,14 @@
  * dynamic import happens.
  */
 
-import { mkdirSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { Command } from "commander";
 import { DEFAULT_SESSIONS_PER_CHUNK, runAnalyst } from "../analyst/analyze.js";
 import { DroverDb } from "../db/database.js";
 import { loadDefaultExport } from "../orchestrator/config-loader.js";
 import { runDiscovery } from "../orchestrator/run-discovery.js";
+import { buildRunReport, renderMarkdownReport } from "../report/index.js";
 import type { DomainPack, SimConfig } from "../types/index.js";
 
 async function registerTsLoader(): Promise<void> {
@@ -102,6 +103,23 @@ async function analyzeCommand(
   }
 }
 
+async function reportCommand(runId: string, options: { db: string; out?: string }): Promise<void> {
+  const db = new DroverDb(options.db);
+  try {
+    const report = buildRunReport(db, runId);
+    const markdown = renderMarkdownReport(report);
+    if (options.out) {
+      mkdirSync(path.dirname(options.out) || ".", { recursive: true });
+      writeFileSync(options.out, markdown);
+      console.log(`Report written to ${options.out}`);
+    } else {
+      console.log(markdown);
+    }
+  } finally {
+    db.close();
+  }
+}
+
 const program = new Command();
 program
   .name("drover")
@@ -151,5 +169,23 @@ program
       }
     },
   );
+
+program
+  .command("report")
+  .description("Generate a markdown findings report for a completed run.")
+  .argument("<run-id>", "id of a previously run/analyzed run")
+  .requiredOption(
+    "-d, --db <path>",
+    "path to the run's SQLite file (the --out path from `drover run`)",
+  )
+  .option("-o, --out <path>", "write the report to this file instead of printing it to stdout")
+  .action(async (runId: string, options: { db: string; out?: string }) => {
+    try {
+      await reportCommand(runId, options);
+    } catch (err) {
+      console.error(err instanceof Error ? err.message : err);
+      process.exitCode = 1;
+    }
+  });
 
 program.parseAsync(process.argv);

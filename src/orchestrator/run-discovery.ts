@@ -298,6 +298,7 @@ export async function runDiscovery(opts: RunDiscoveryOptions): Promise<RunDiscov
     console.error(`[drover] finding reconciliation failed for run ${runId}:`, err);
   }
 
+  db.updateRunActorCost(runId, totalCostUsd);
   db.updateRunStatus(runId, status, Date.now());
 
   if (crashError) throw crashError;
