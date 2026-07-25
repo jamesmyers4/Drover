@@ -14,7 +14,7 @@
  * `techSavviness` changes the system-prompt framing; `patience` shapes
  * retry/wait behavior in the loop (src/actor/loop.ts), not the prompt text.
  * Traits are treated as 0..1 normalized values (not specified numerically in
- * CONTEXT.md — documented in BUILD-STATE.md's decisions log).
+ * CONTEXT.md — documented in SESSION-LOG.md's Session 3 entry).
  */
 
 import type { DomainPack, Goal, PersonaArchetype } from "../types/index.js";

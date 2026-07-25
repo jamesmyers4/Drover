@@ -126,7 +126,7 @@ export function buildCheckpointContext(
 
 export async function runDiscovery(opts: RunDiscoveryOptions): Promise<RunDiscoveryResult> {
   const { db, domainPack, config } = opts;
-  // Enforced once at config-load time, not per-session (BUILD-STATE.md S3 note for S4).
+  // Enforced once at config-load time, not per-session (SESSION-LOG.md's Session 3 note for Session 4).
   assertDataPolicyAllowed(domainPack.dataPolicy, config.modelRouting.actor);
   assertConcurrencyCapValid(config.concurrencyCap);
   const concurrencyCap = config.concurrencyCap ?? 1;

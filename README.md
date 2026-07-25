@@ -6,7 +6,7 @@ Drover is an open-source, config-driven simulation harness that runs AI-driven p
 
 Two AI tiers currently exist: an **actor** tier that drives a real browser one persona-session at a time (perceive → decide → act, LLM-reasoned), and an **analyst** tier that mines patterns across a completed run's sessions after the fact. A **fixer** tier (auto-proposing code fixes) is explicitly Phase 2 and not part of this codebase yet. See `CONTEXT.md` for the full product spec and `CLAUDE.md` for the as-built architecture map — this README is the practical entry point.
 
-**Status:** Sessions 1–6 of the build are done (types/DB, browser harness, actor tier, discovery orchestrator, analyst tier, markdown reporting). Not yet built: Stampede (scripted load-replay) mode, example domain packs, and the real Horse Haven Ops pack. See `BUILD-STATE.md` for exact status and `GAPS.md` for known blind spots.
+**Status:** Sessions 1–6 of the build are done (types/DB, browser harness, actor tier, discovery orchestrator, analyst tier, markdown reporting). Not yet built: Stampede (scripted load-replay) mode, example domain packs, and the real Horse Haven Ops pack. See `SESSION-LOG.md` for the full dated history and `GAPS.md` for known blind spots.
 
 ## What it does today
 
@@ -213,7 +213,7 @@ Explicitly out of scope until the core simulation concept is proven out — see 
 
 - `CONTEXT.md` — the full product/architecture spec.
 - `CLAUDE.md` — the as-built technical map, including every decision CONTEXT.md left open and how it was resolved.
-- `BUILD-STATE.md` — current status, dated decisions log, pending user input (credentials, staging access).
+- `SESSION-LOG.md` — dated build history, session by session, plus outstanding pending user input (credentials, staging access).
 - `GAPS.md` / `TREELINE-GAPS.md` — known blind spots in Drover and in the treeLine integration, respectively.
 
 ## License

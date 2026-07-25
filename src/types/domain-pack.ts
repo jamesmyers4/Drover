@@ -44,7 +44,7 @@ export interface DomainPack {
    * Optional config-declared cleanup hook that wipes run-created staging
    * data (CONTEXT.md "Environment & safety": "staging teardown wipes
    * everything a run created before the next one starts"). Not in
-   * CONTEXT.md's verbatim schema — added in Session 4, see BUILD-STATE.md.
+   * CONTEXT.md's verbatim schema — added in Session 4, see SESSION-LOG.md.
    * Runs finally-style: after a completed, budget-stopped, *or* crashed run.
    */
   teardown?: (ctx: DomainPackTeardownContext) => Promise<void>;

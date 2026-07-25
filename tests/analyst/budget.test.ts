@@ -15,8 +15,8 @@ describe("estimateTokens", () => {
   });
 });
 
-// No ANTHROPIC_API_KEY is available in this environment (see BUILD-STATE.md
-// "Pending user input"), so every call below either injects a fake
+// No ANTHROPIC_API_KEY is available in this environment (see SESSION-LOG.md's
+// "Outstanding pending user input"), so every call below either injects a fake
 // TokenCounter or relies on the real one's construction/call rejecting and
 // estimateAnalystCostUsd falling back to the chars/4 heuristic — the same
 // heuristic math the pre-tokenizer version of these tests asserted on.

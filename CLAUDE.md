@@ -1,18 +1,20 @@
 # CLAUDE.md — Drover Technical Reference
 
-Drover is an open-source, config-driven simulation harness that runs AI-driven personas through a web app to surface bugs, confusing flows, and performance problems. The full product/architecture spec is in **`CONTEXT.md`** in this repo root — read it in full at the start of every session before doing anything else. This file is the technical map of what actually exists in the codebase and the decisions that shaped it; CONTEXT.md is the spec, this file is the as-built reality. Where the two conflict, treat CONTEXT.md as the intended design and this file (plus `BUILD-STATE.md`'s decisions log) as what was actually implemented and why it may differ.
+Drover is an open-source, config-driven simulation harness that runs AI-driven personas through a web app to surface bugs, confusing flows, and performance problems. The full product/architecture spec is in **`CONTEXT.md`** in this repo root — read it in full at the start of every session before doing anything else. This file is the technical map of what actually exists in the codebase and the decisions that shaped it; CONTEXT.md is the spec, this file is the as-built reality. Where the two conflict, treat CONTEXT.md as the intended design and this file (plus `SESSION-LOG.md`'s dated history) as what was actually implemented and why it may differ.
 
-Also read `BUILD-STATE.md` (current status, decisions log, pending user input) and skim `GAPS.md` / `TREELINE-GAPS.md` (known blind spots) before making non-trivial changes — several "obvious" improvements are already logged there as deliberate post-v1 deferrals.
+Also read `SESSION-LOG.md` (dated build history, session by session, with the full rationale behind every decision condensed below) and skim `GAPS.md` / `TREELINE-GAPS.md` (known blind spots) before making non-trivial changes — several "obvious" improvements are already logged there as deliberate post-v1 deferrals.
 
 ---
 
 ## Build status
 
-Sessions 1–6 of the original build plan are done: core types + SQLite layer, browser harness + treeLine adapter, the actor tier (LLM persona loop), the discovery-mode orchestrator, the analyst tier (cross-session pattern mining), and markdown reporting. See `BUILD-STATE.md` for the authoritative, up-to-date status, the full decisions log, and the exact next step.
+Sessions 1–6 of the original build plan are done: core types + SQLite layer, browser harness + treeLine adapter, the actor tier (LLM persona loop), the discovery-mode orchestrator, the analyst tier (cross-session pattern mining), and markdown reporting. See `SESSION-LOG.md` for the full dated history and decisions log, session by session.
+
+**Next step:** Session 7 — Stampede mode (`src/stampede/`): takes the routes/checkpoints discovery mode already found and replays them as scripted (non-LLM, no reasoning) Playwright sessions at volume, per CONTEXT.md's "Execution modes." Captures response time percentiles (p50/p95/p99) per route and error rate under load. New CLI command. Do not start Session 8.
 
 **Not yet built:** Stampede mode (`src/stampede/`, scripted load replay), the example domain packs and README quickstart (`examples/`), the real Horse Haven Ops domain pack, and a validation run against Horse Haven staging. These map to the original plan's Session 7–9 scope. Treat CONTEXT.md's relevant sections ("Stampede mode," "Open source packaging") as the spec for that work when it's picked up.
 
-No `ANTHROPIC_API_KEY` has been available in any build environment so far — every real-model code path (actor tier, analyst tier's Batch API) is implemented and covered by scripted/mocked tests, but has never been exercised against a live model. The smoke scripts (`npm run smoke:actor`, `smoke:orchestrator`, `smoke:analyst`) detect the missing key and skip gracefully rather than failing. Run them with a real key before trusting real-model behavior.
+No `ANTHROPIC_API_KEY` has been available in any build environment so far — every real-model code path (actor tier, analyst tier's Batch API) is implemented and covered by scripted/mocked tests, but has never been exercised against a live model. The smoke scripts (`npm run smoke:actor`, `smoke:orchestrator`, `smoke:analyst`) detect the missing key and skip gracefully rather than failing. Run them with a real key before trusting real-model behavior. Horse Haven staging URL/credentials are also still pending — smoke has only ever run against the local fixture site (`SMOKE_URL=<url>` points it at a real target when available); creds become truly blocking once the real Horse Haven Ops domain pack work starts.
 
 ---
 
@@ -89,7 +91,7 @@ Barrel exports: each subdirectory has an `index.ts`; `src/index.ts` re-exports t
 
 ## Key implementation decisions
 
-These are decisions CONTEXT.md left open that got resolved during the build. Full rationale for each lives in `BUILD-STATE.md`'s decisions log (dated entries) — this is a condensed index by topic. **Read the full entry before changing any of these**, since several have non-obvious reasons.
+These are decisions CONTEXT.md left open that got resolved during the build. Full rationale for each lives in `SESSION-LOG.md` (dated entries) — this is a condensed index by topic. **Read the full entry before changing any of these**, since several have non-obvious reasons.
 
 **Tooling & environment**
 - Linter/formatter: **Biome**, not ESLint (`biome.json` — must include `scripts/**` in `files.includes`, this was a real bug once already).
@@ -188,7 +190,7 @@ Repo locations for sibling dependencies:
 
 ## Working conventions
 
-- Keep `BUILD-STATE.md` current: what exists, pending user input (credentials, staging access), and a decisions log entry (with one-line rationale) for anything this file doesn't already dictate.
+- Keep `SESSION-LOG.md` current: a new dated session entry (with one-line rationale for any non-obvious decision) for anything this file doesn't already dictate.
 - Log Drover's own shortcomings to `GAPS.md` and treeLine-specific limitations to `TREELINE-GAPS.md` as they're found — both are meant to accumulate over the life of the project, not just during initial build-out.
 - Never end a change with a broken build or failing tests — `tsc --noEmit`/`tsc` and `vitest run` clean, `biome check` clean.
 - Prefer scripted/mocked model providers (`ScriptedModelProvider`, `ScriptedAnalystProvider`) for test coverage of loop mechanics; reserve real-model smoke scripts for confirming actual model behavior when credentials are available.

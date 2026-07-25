@@ -10,7 +10,7 @@
  * week 2's) rather than persona-major — CONTEXT.md doesn't specify an order,
  * only that execution is sequential; week-major better reflects "simulated
  * organizational time" than batching one persona's whole tenure first. See
- * BUILD-STATE.md's decisions log.
+ * SESSION-LOG.md's Session 4 entry.
  */
 
 import type { DomainPack, RunDimensions, WeightedGoal } from "../types/index.js";

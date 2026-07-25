@@ -1,6 +1,6 @@
 /**
  * Cross-run finding identity key (CONTEXT.md "Data capture & storage": each
- * finding "carries a status tag across runs"; BUILD-STATE.md S1 decision:
+ * finding "carries a status tag across runs"; SESSION-LOG.md's Session 1 decision:
  * "finding type + normalized route + target identifier"). Session 3 shipped
  * a provisional version inline in src/actor/findings.ts; this is the real
  * one, owned by Session 4 and shared by both the actor tier (finding
