@@ -1,5 +1,6 @@
 import type { Browser } from "playwright";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import type { ActorDecideResult, ModelProvider } from "../../src/actor/provider.js";
 import { ScriptedModelProvider } from "../../src/actor/provider.js";
 import { launchBrowser } from "../../src/browser/index.js";
 import { DroverDb } from "../../src/db/database.js";
@@ -269,37 +270,134 @@ describe("runDiscovery", () => {
     TIMEOUT,
   );
 
-  it("rejects a concurrencyCap above 1 instead of silently running sequentially", async () => {
-    db = new DroverDb(":memory:");
+  it.each([0, -1, 2.5, Number.NaN])(
+    "rejects an invalid concurrencyCap (%s) before writing the run row",
+    async (invalidCap) => {
+      db = new DroverDb(":memory:");
 
-    const domainPack: DomainPack = {
-      appName: "fixture-app",
-      personas: [
-        {
-          id: "p1",
-          name: "Solo",
-          traits: { patience: 0.5, techSavviness: 0.5, deviceType: "desktop", familiarity: "new" },
-        },
-      ],
-      goals: [
-        {
-          id: "trivial",
-          description: "Finish immediately.",
-          actionBudget: 5,
-          checkpoints: [{ id: "never", description: "Never.", detector: "url:/never-reached" }],
-          successCheckpointId: "never",
-        },
-      ],
-      goalWeightsByPersona: { p1: [{ goalId: "trivial", weight: 1 }] },
-      dataPolicy: "synthetic-only",
-    };
+      const domainPack: DomainPack = {
+        appName: "fixture-app",
+        personas: [
+          {
+            id: "p1",
+            name: "Solo",
+            traits: {
+              patience: 0.5,
+              techSavviness: 0.5,
+              deviceType: "desktop",
+              familiarity: "new",
+            },
+          },
+        ],
+        goals: [
+          {
+            id: "trivial",
+            description: "Finish immediately.",
+            actionBudget: 5,
+            checkpoints: [{ id: "never", description: "Never.", detector: "url:/never-reached" }],
+            successCheckpointId: "never",
+          },
+        ],
+        goalWeightsByPersona: { p1: [{ goalId: "trivial", weight: 1 }] },
+        dataPolicy: "synthetic-only",
+      };
 
-    const config = baseConfig({ targetBaseUrl: site.baseUrl, concurrencyCap: 4 });
+      const config = baseConfig({ targetBaseUrl: site.baseUrl, concurrencyCap: invalidCap });
 
-    const insertRunSpy = vi.spyOn(db, "insertRun");
+      const insertRunSpy = vi.spyOn(db, "insertRun");
 
-    await expect(
-      runDiscovery({
+      await expect(
+        runDiscovery({
+          db,
+          domainPack,
+          config,
+          screenshotDir: "runs/screenshots-test",
+          browser,
+          treelineAdapter: stubAdapter,
+          disablePacing: true,
+          providerFactory: () => new ScriptedModelProvider([]),
+        }),
+      ).rejects.toThrow(/concurrencyCap/);
+
+      // The guard must fire before any run row is written — a rejected config
+      // shouldn't leave a "running" run behind for a pack author to find later.
+      expect(insertRunSpy).not.toHaveBeenCalled();
+    },
+  );
+
+  it(
+    "actually overlaps sessions in time when concurrencyCap is above 1, and completes them all",
+    async () => {
+      db = new DroverDb(":memory:");
+
+      const domainPack: DomainPack = {
+        appName: "fixture-app",
+        personas: [
+          {
+            id: "p1",
+            name: "Quick",
+            traits: {
+              patience: 0.5,
+              techSavviness: 0.5,
+              deviceType: "desktop",
+              familiarity: "new",
+            },
+          },
+        ],
+        goals: [
+          {
+            id: "trivial",
+            description: "Finish immediately.",
+            actionBudget: 5,
+            checkpoints: [{ id: "never", description: "Never.", detector: "url:/never-reached" }],
+            successCheckpointId: "never",
+          },
+        ],
+        goalWeightsByPersona: { p1: [{ goalId: "trivial", weight: 1 }] },
+        dataPolicy: "synthetic-only",
+      };
+
+      const config = baseConfig({
+        targetBaseUrl: site.baseUrl,
+        runDimensions: { orgSize: 6, simulatedWeeks: 1, sessionsPerPersonaPerWeek: 1 },
+        concurrencyCap: 3,
+      });
+
+      // Every session's provider blocks for DELAY_MS on its one decide() call
+      // before resolving "finish/success" — with 6 sessions, cap 3, and a
+      // real delay, peak concurrent in-flight decide() calls can only exceed
+      // 1 if runDiscovery is actually overlapping sessions, not just
+      // permitting a cap above 1 while still running them one at a time.
+      const DELAY_MS = 100;
+      let active = 0;
+      let maxActive = 0;
+
+      class DelayedFinishProvider implements ModelProvider {
+        readonly provider = "delayed-finish";
+        readonly model = "delayed-finish";
+        async decide(): Promise<ActorDecideResult> {
+          active++;
+          maxActive = Math.max(maxActive, active);
+          await new Promise((resolve) => setTimeout(resolve, DELAY_MS));
+          active--;
+          return {
+            decision: {
+              reasoning: "Finishing right away.",
+              actionType: "finish",
+              outcome: "success",
+            },
+            usage: {
+              inputTokens: 0,
+              outputTokens: 0,
+              cacheWriteTokens: 0,
+              cacheReadTokens: 0,
+              costUsd: 0,
+            },
+          };
+        }
+      }
+
+      const result = await runDiscovery({
         db,
         domainPack,
         config,
@@ -307,14 +405,20 @@ describe("runDiscovery", () => {
         browser,
         treelineAdapter: stubAdapter,
         disablePacing: true,
-        providerFactory: () => new ScriptedModelProvider([]),
-      }),
-    ).rejects.toThrow(/concurrencyCap/);
+        providerFactory: () => new DelayedFinishProvider(),
+      });
 
-    // The guard must fire before any run row is written — a rejected config
-    // shouldn't leave a "running" run behind for a pack author to find later.
-    expect(insertRunSpy).not.toHaveBeenCalled();
-  });
+      expect(result.status).toBe("completed");
+      expect(result.sessionsScheduled).toBe(6);
+      expect(result.sessionsCompleted).toBe(6);
+      expect(result.sessionsErrored).toBe(0);
+      expect(result.sessionsHardStopped).toBe(0);
+      // The real proof of concurrency: more than one session's decide() call
+      // was in flight at the same wall-clock moment.
+      expect(maxActive).toBeGreaterThan(1);
+    },
+    TIMEOUT,
+  );
 });
 
 describe("buildCheckpointContext", () => {

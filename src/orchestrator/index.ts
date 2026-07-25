@@ -2,7 +2,7 @@ export { ConfigLoadError, loadDefaultExport } from "./config-loader.js";
 export { type ReconciliationSummary, reconcileRunFindings } from "./reconcile.js";
 export {
   buildCheckpointContext,
-  ConcurrencyNotImplementedError,
+  InvalidConcurrencyCapError,
   type RunDiscoveryOptions,
   type RunDiscoveryResult,
   runDiscovery,
