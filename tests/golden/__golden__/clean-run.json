@@ -1,0 +1,52 @@
+{
+  "run": {
+    "status": "completed",
+    "sessionsScheduled": 2,
+    "sessionsCompleted": 2,
+    "sessionsHardStopped": 0,
+    "sessionsBudgetCapped": 0,
+    "sessionsErrored": 0,
+    "totalCostUsd": 0.02,
+    "reconciliation": {
+      "new": 0,
+      "stillOpen": 0,
+      "resolved": 0
+    }
+  },
+  "sessions": [
+    {
+      "personaId": "p-dashboard",
+      "goalId": "g-dashboard",
+      "status": "completed",
+      "events": [
+        {
+          "actionType": "navigate",
+          "target": "<BASE_URL>"
+        },
+        {
+          "actionType": "navigate",
+          "target": "<BASE_URL>/dashboard",
+          "checkpointId": "on-dashboard"
+        }
+      ],
+      "findings": []
+    },
+    {
+      "personaId": "p-horses",
+      "goalId": "g-horses",
+      "status": "completed",
+      "events": [
+        {
+          "actionType": "navigate",
+          "target": "<BASE_URL>"
+        },
+        {
+          "actionType": "navigate",
+          "target": "<BASE_URL>/horses",
+          "checkpointId": "on-horses"
+        }
+      ],
+      "findings": []
+    }
+  ]
+}

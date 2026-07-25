@@ -15,9 +15,9 @@ line and add a dated entry under "Decisions log" for anything non-obvious
 that came up, then stop. The user reviews and commits manually between
 sessions and restarts Claude Code for the next one.
 
-**Current session: 3 — Golden-master pipeline layer**
-**Next step:** Work through Session 3 below. Do not start Session 4 in the
-same run.
+**Current session: 4 — Wire into CI, close the loop**
+**Next step:** Work through Session 4 below. Do not start any further
+session beyond it in the same run.
 
 ---
 
@@ -436,3 +436,61 @@ Net: 4 new test cases added across 2 files (`tests/db.test.ts` ×4 new
 `tests/actor/loop.test.ts` each gained one assertion inside an existing
 test, not a new `it()`), plus one new `GAPS.md` entry. Test count went from
 111 to 115. `npm run typecheck`/`build`/`lint`/`test` all still clean.
+
+**2026-07-24 (Session 3 — Golden-master pipeline layer)** — Built
+`tests/golden/` per the plan: `normalize-golden.ts` (deep-walks a JSON value
+replacing the fixture site's ephemeral `baseUrl` with `<BASE_URL>` and any
+UUID-shaped substring with `<UUID>`), `dump-run.ts` (flattens a
+`runDiscovery` call's DB rows into a stable, sorted shape), `golden-file.ts`
+(`expectMatchesGolden` — compares serialized strings, not `toEqual`, so a
+failure prints a real line-by-line diff), and 3 locked scenarios in
+`run-discovery.golden.test.ts` (clean run, mixed outcomes, budget-stopped),
+each driven directly through `runDiscovery` against the real fixture
+browser with `ScriptedModelProvider`. The 4th (analyst cross-session)
+scenario is deliberately deferred, per the plan's own note — no reporting
+consumer exists yet to make locking down raw `cross_session_findings` rows
+worthwhile.
+
+Real finding, not assumed — a genuine flaky-golden-file bug caught by
+actually running the suite repeatedly (20 back-to-back runs), not by
+inspection: the first `dump-run.ts` draft included every raw
+`action_events` row per session, sorted by `(timestamp, actionType,
+target)`. That still flaked (~1 in 5–8 runs) because a failed navigate's
+synchronous `action-error` (logged from `performAction`'s catch block) and
+Playwright's async `requestfailed`-driven `http-failure` observation for
+that *same* failure are two independent listeners with no fixed relative
+order — sometimes one's real timestamp is a millisecond earlier, sometimes
+the other's, so no sort key built from real timestamps can pin it down;
+it's a genuine runtime race, not a tie-breaking artifact. Fix: narrowed
+`dump-run.ts`'s `events` to primitive actions only
+(`navigate`/`click`/`fill`) and dropped passive observation events
+(`console-error`/`http-failure`/`page-error`/`action-error`) from the dump
+entirely — their relative arrival order isn't meaningful behavior to lock
+down, and the `findings` list (already deduped/sorted, unaffected by this
+race) is what actually matters for regression coverage of errors. Verified
+by rerunning the golden suite 20 times consecutively with zero failures
+after the fix (vs. 2 failures in an earlier 15-run batch before it).
+Designing the "mixed outcomes" scenario also deliberately avoided pairing
+the fixture's console-error page with its 500 endpoint in the same
+session, for a related reason documented inline in the test: Chromium logs
+its own "Failed to load resource" console error for a 500 response *in
+addition to* Drover's own tracked `http-failure` event for it (same
+behavior `tests/actor/loop.test.ts`'s existing test already flagged with a
+`.some()`-not-exact-count check) — pinning an exact finding count across
+that interaction would make the golden file dependent on Chromium's own
+network-failure console logging behavior, not on Drover's.
+- Performed the corrupt-then-restore check required by this file: hand-edited
+  `clean-run.json`'s `totalCostUsd` to a wrong value, reran the suite, got a
+  correct human-readable diff (not a silent pass), then restored it. Also
+  deleted `budget-stopped.json` entirely, confirmed the "Golden file ... does
+  not exist" error path fires, then regenerated it via `UPDATE_GOLDEN=1` and
+  confirmed the output byte-for-byte matched what it had before deletion.
+- Confirmed `biome.json`'s `files.includes` (`["src/**", "tests/**",
+  "scripts/**"]`) already covers `tests/golden/**` without any change —
+  `npm run lint` picked up the new directory automatically (69 files
+  checked, up from 62).
+- The golden tests run as part of the normal `vitest run` / `npm test`
+  invocation (no separate script or CI step) — `tests/golden/*.test.ts`
+  matches vitest's default test-file glob same as every other suite.
+- Test count went from 115 to 118 (3 new golden scenarios); file count from
+  17 to 18. `npm run typecheck`/`build`/`lint`/`test` all clean.

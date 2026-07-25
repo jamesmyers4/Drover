@@ -1,0 +1,83 @@
+{
+  "run": {
+    "status": "completed",
+    "sessionsScheduled": 3,
+    "sessionsCompleted": 2,
+    "sessionsHardStopped": 1,
+    "sessionsBudgetCapped": 0,
+    "sessionsErrored": 0,
+    "totalCostUsd": 0.05,
+    "reconciliation": {
+      "new": 2,
+      "stillOpen": 0,
+      "resolved": 0
+    }
+  },
+  "sessions": [
+    {
+      "personaId": "p-finding",
+      "goalId": "g-finding",
+      "status": "completed",
+      "events": [
+        {
+          "actionType": "navigate",
+          "target": "<BASE_URL>"
+        },
+        {
+          "actionType": "navigate",
+          "target": "<BASE_URL>/broken"
+        }
+      ],
+      "findings": [
+        {
+          "type": "console-error",
+          "severity": "low",
+          "matchKey": "console-error:/broken"
+        }
+      ]
+    },
+    {
+      "personaId": "p-hardstop",
+      "goalId": "g-hardstop",
+      "status": "hard-stopped",
+      "events": [
+        {
+          "actionType": "navigate",
+          "target": "<BASE_URL>"
+        },
+        {
+          "actionType": "navigate",
+          "target": "http://127.0.0.1:1/"
+        },
+        {
+          "actionType": "navigate",
+          "target": "http://127.0.0.1:1/"
+        }
+      ],
+      "findings": [
+        {
+          "type": "hard-stop",
+          "severity": "critical",
+          "matchKey": "hard-stop:/"
+        }
+      ]
+    },
+    {
+      "personaId": "p-success",
+      "goalId": "g-success",
+      "status": "completed",
+      "events": [
+        {
+          "actionType": "navigate",
+          "target": "<BASE_URL>"
+        },
+        {
+          "actionType": "navigate",
+          "target": "<BASE_URL>/dashboard",
+          "checkpointId": "on-dashboard"
+        }
+      ],
+      "findings": []
+    }
+  ]
+}
