@@ -4,7 +4,13 @@ export {
   RunNotFoundError,
   runAnalyst,
 } from "./analyze.js";
-export { AnalystBudgetExceededError, estimateAnalystCostUsd, estimateTokens } from "./budget.js";
+export {
+  AnalystBudgetExceededError,
+  createApiTokenCounter,
+  estimateAnalystCostUsd,
+  estimateTokens,
+  type TokenCounter,
+} from "./budget.js";
 export { buildSessionDigest, type SessionDigest } from "./digest.js";
 export { buildAnalystSystemPrompt, buildAnalystUserPrompt } from "./prompt.js";
 export {

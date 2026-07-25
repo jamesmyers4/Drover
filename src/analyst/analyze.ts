@@ -94,7 +94,7 @@ export async function runAnalyst(opts: RunAnalystOptions): Promise<RunAnalystRes
 
   const ceilingUsd = run.config.budget.analystCeilingUsd;
   if (ceilingUsd !== undefined) {
-    const estimatedCostUsd = estimateAnalystCostUsd(
+    const estimatedCostUsd = await estimateAnalystCostUsd(
       run.config.modelRouting.analyst.model,
       systemPrompt,
       userPrompt,
