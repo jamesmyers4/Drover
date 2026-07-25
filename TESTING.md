@@ -8,7 +8,7 @@ and `CONTEXT.md` first, same as any other work in this repo.
 
 ## What exists
 
-- **Unit/integration tests** — 26 files, 208 tests (`vitest run` / `npm
+- **Unit/integration tests** — 26 files, 214 tests (`vitest run` / `npm
   test`, current as of 2026-07-25 — trust a fresh `npm test` run's own
   summary over this number if it's drifted). Real coverage, not
   placeholder: `tests/fixtures/site.ts` is a local `node:http` fixture
@@ -606,3 +606,50 @@ and `src/actor/loop.ts`:
 
 `TESTING-GAPS.md`'s Session 2 entry updated in place with a "CLOSED
 2026-07-25" disposition, same convention as Session 1.
+
+**2026-07-25 (TESTING-GAPS.md Session 3 — analyst tier: `BatchAnalystProvider`'s
+real lifecycle)** — The single biggest gap in the suite going in
+(`src/analyst/provider.ts` at 37.5%/22.2%/40%, `BatchAnalystProvider.analyze()`
+entirely untested). Closed:
+
+- New `tests/analyst/provider.test.ts` cases, mirroring the `vi.mock("@anthropic-ai/sdk", ...)`
+  whole-module-mock pattern `tests/actor/provider.test.ts` already
+  established for `AnthropicModelProvider` (mocking `messages.batches.create`/
+  `.retrieve`/`.results` this time, plus a small local `asyncIterableOf`
+  helper standing in for the SDK's `JSONLDecoder` stream since the real
+  results endpoint returns an async-iterable, not an array): the happy path
+  (batch already `"ended"` on `create`, no polling — asserted via
+  `mockBatchRetrieve` never being called, plus a check on the actual
+  `create()` request shape: forced `tool_choice`, right `custom_id`/model),
+  the polling path (`retrieve` mocked to return `"in_progress"` once then
+  `"ended"`, asserted called exactly twice — proves the loop really waits
+  and re-polls rather than exiting early), and all three `AnalystBatchError`
+  paths from `TESTING-GAPS.md`'s own list (no stream line matches the
+  `custom_id`, a matching line whose `result.type !== "succeeded"`, and a
+  succeeded line with no `report_cross_session_findings` tool_use block).
+  `src/analyst/provider.ts` went from 37.5%/22.2%/40% to
+  97.91%/81.48%/100%/100% (stmts/branch/funcs/lines).
+- Closed the paired `src/analyst/analyze.ts` gap in the same session
+  (`createAnalystProvider`'s no-explicit-`provider` fallback branch, never
+  actually constructed in any existing test): added a `vi.mock` in
+  `tests/analyst/analyze.test.ts` that wraps — not replaces —
+  `createAnalystProvider` via `importOriginal`, capturing whatever provider
+  `runAnalyst` builds internally without needing to fake the whole SDK. The
+  real, uncredentialed `Anthropic` client's `analyze()` call rejects fast
+  (confirmed directly: `messages.batches.create(...)` throws "Could not
+  resolve authentication method" synchronously, no real network I/O
+  attempted) rather than hanging, so `await runAnalyst(...).catch(() => {})`
+  followed by an `instanceof BatchAnalystProvider` assertion on the captured
+  provider is enough — matching this plan's own "doesn't need to run to
+  completion" allowance. This doesn't touch any of the file's other tests,
+  which all pass an explicit `provider` and never reach this branch.
+- Test count went from 26 files/208 tests to 26 files/214 tests (6 new
+  cases: 5 in `provider.test.ts`, 1 in `analyze.test.ts`). `npm run
+  typecheck`, `npm run lint`, and `npm test` all clean. Remaining small
+  gaps in `provider.ts` not pursued (out of this session's scope, not
+  flagged as must-fix by the plan): `extractFindings`'s non-object/
+  non-array input guard, and `createAnalystProvider`'s `opts?.pollIntervalMs`
+  branch.
+
+`TESTING-GAPS.md`'s Session 3 entry updated in place with a "CLOSED
+2026-07-25" disposition, same convention as Sessions 1–2.

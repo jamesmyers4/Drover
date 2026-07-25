@@ -7,11 +7,36 @@ import {
 import { estimateAnalystCostUsd } from "../../src/analyst/budget.js";
 import type { SessionDigest } from "../../src/analyst/digest.js";
 import { buildAnalystSystemPrompt, buildAnalystUserPrompt } from "../../src/analyst/prompt.js";
-import type { RawCrossSessionFinding } from "../../src/analyst/provider.js";
-import { DEFAULT_MAX_TOKENS, ScriptedAnalystProvider } from "../../src/analyst/provider.js";
+import type { AnalystProvider, RawCrossSessionFinding } from "../../src/analyst/provider.js";
+import {
+  BatchAnalystProvider,
+  DEFAULT_ANALYST_MODEL,
+  DEFAULT_MAX_TOKENS,
+  ScriptedAnalystProvider,
+} from "../../src/analyst/provider.js";
 import { DroverDb, newId } from "../../src/db/database.js";
 import { reconcileRunFindings } from "../../src/orchestrator/reconcile.js";
 import type { InSessionFinding, PersonaSession, Run, SimConfig } from "../../src/types/index.js";
+
+// Wraps the real createAnalystProvider (not a full SDK mock) so this file's
+// "no provider override" test can prove runAnalyst's own fallback actually
+// constructs a real BatchAnalystProvider, without the rest of this file's
+// tests (which all pass an explicit provider and never reach this branch)
+// needing to know about it.
+let capturedProvider: AnalystProvider | undefined;
+vi.mock("../../src/analyst/provider.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../src/analyst/provider.js")>();
+  return {
+    ...actual,
+    createAnalystProvider: (
+      ...args: Parameters<typeof actual.createAnalystProvider>
+    ): ReturnType<typeof actual.createAnalystProvider> => {
+      const provider = actual.createAnalystProvider(...args);
+      capturedProvider = provider;
+      return provider;
+    },
+  };
+});
 
 const appName = "fixture-app";
 
@@ -504,5 +529,41 @@ describe("runAnalyst", () => {
 
     await runAnalyst({ db, runId: run.id, provider });
     expect(analyzeSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("constructs a real BatchAnalystProvider via createAnalystProvider when no provider override is given", async () => {
+    const anthropicConfig: SimConfig = {
+      ...config,
+      modelRouting: {
+        ...config.modelRouting,
+        analyst: { provider: "anthropic", model: DEFAULT_ANALYST_MODEL },
+      },
+    };
+    const run: Run = {
+      id: newId(),
+      appName,
+      config: anthropicConfig,
+      status: "completed",
+      startedAt: 1000,
+    };
+    db.insertRun(run);
+    db.insertSession({
+      id: newId(),
+      runId: run.id,
+      personaId: "p0",
+      goalId: "g1",
+      status: "completed",
+      startedAt: 1000,
+      endedAt: 2000,
+    });
+
+    // No ANTHROPIC_API_KEY in this environment, so the real
+    // BatchAnalystProvider's analyze() call rejects fast — the SDK refuses
+    // before any network I/O happens (confirmed separately) rather than
+    // hanging. Only construction is under test here, not a full lifecycle.
+    await runAnalyst({ db, runId: run.id }).catch(() => {});
+
+    expect(capturedProvider).toBeInstanceOf(BatchAnalystProvider);
+    expect(capturedProvider?.model).toBe(DEFAULT_ANALYST_MODEL);
   });
 });

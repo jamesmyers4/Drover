@@ -400,7 +400,7 @@ calls out, not new. Full detail in `TESTING.md`'s decisions log.
   uses at the `BrowserSession` layer, just driven through
   `runPersonaSession` this time).
 
-### Session 3 — Analyst tier: `BatchAnalystProvider`'s real lifecycle
+### Session 3 — Analyst tier: `BatchAnalystProvider`'s real lifecycle — CLOSED 2026-07-25
 
 The single biggest gap in the suite. Mirror the mocking pattern
 `tests/actor/provider.test.ts` already established for
@@ -431,6 +431,28 @@ real `BatchAnalystProvider` from `run.config.modelRouting.analyst` (mock
 just enough of the SDK to avoid it trying a real network call — asserting
 construction happened, e.g. via `instanceof`, is enough; it doesn't need to
 run to completion).
+
+**Disposition:** `src/analyst/provider.ts` now 97.91%/81.48%/100%/100%
+(stmts/branch/funcs/lines; up from 37.5%/22.2%/40%) via 5 new cases in
+`tests/analyst/provider.test.ts`, mocking `@anthropic-ai/sdk`'s
+`messages.batches.{create,retrieve,results}` the same way
+`tests/actor/provider.test.ts` already mocks `messages.create` for
+`AnthropicModelProvider`: the happy path (already-`"ended"` on create, no
+polling), the polling path (`retrieve` returns `"in_progress"` once then
+`"ended"`, asserted called exactly twice), and all three `AnalystBatchError`
+paths (no matching `custom_id`, matching-but-not-`"succeeded"`, and
+succeeded-with-no-tool_use-block). `src/analyst/analyze.ts`'s
+`createAnalystProvider` fallback branch is also now closed, in
+`tests/analyst/analyze.test.ts`, via a `vi.mock` that wraps (not replaces)
+the real `createAnalystProvider` export using `importOriginal` — captures
+the constructed provider without needing to fake the whole SDK, since the
+real, uncredentialed `Anthropic` client rejects fast on the actual
+`analyze()` call (no network I/O attempted) rather than hanging, and the
+test only asserts `instanceof BatchAnalystProvider` before that rejection
+lands. Remaining small gaps in `provider.ts` (an `extractFindings` non-
+object/non-array input guard, and the `createAnalystProvider` `opts`
+branch) weren't in this session's scope and weren't pursued. Full detail in
+`TESTING.md`'s decisions log.
 
 ### Session 4 — Analyst tier: remaining small gaps
 
