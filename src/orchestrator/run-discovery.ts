@@ -30,7 +30,12 @@
  * session in flight to begin with.
  *
  * Teardown runs finally-style: after a completed, budget-stopped, or crashed
- * run alike (CONTEXT.md "Environment & safety").
+ * run alike (CONTEXT.md "Environment & safety"). It's passed `runStartedAt`/
+ * `runEndedAt` (GAPS.md's S4 entry) so a pack author can sweep-by-timestamp-
+ * window without needing their own SQLite access — `runEndedAt` is `Date.now()`
+ * taken right here, since the DB row's own `endedAt` isn't written until after
+ * teardown returns (reconciliation and the final status update both still
+ * need to run first).
  */
 
 import type { Browser } from "playwright";
@@ -281,7 +286,12 @@ export async function runDiscovery(opts: RunDiscoveryOptions): Promise<RunDiscov
   } finally {
     if (domainPack.teardown) {
       try {
-        await domainPack.teardown({ runId, targetBaseUrl: config.targetBaseUrl });
+        await domainPack.teardown({
+          runId,
+          targetBaseUrl: config.targetBaseUrl,
+          runStartedAt: run.startedAt,
+          runEndedAt: Date.now(),
+        });
       } catch (teardownErr) {
         console.error(`[drover] teardown hook failed for run ${runId}:`, teardownErr);
       }

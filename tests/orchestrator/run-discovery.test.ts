@@ -47,6 +47,7 @@ describe("runDiscovery", () => {
     "runs a small schedule sequentially and survives one session hard-stopping",
     async () => {
       db = new DroverDb(":memory:");
+      const before = Date.now();
       const teardownCalls: DomainPackTeardownContext[] = [];
 
       const domainPack: DomainPack = {
@@ -144,7 +145,15 @@ describe("runDiscovery", () => {
       expect(sessions.map((s) => s.status).sort()).toEqual(["completed", "hard-stopped"]);
 
       expect(teardownCalls).toHaveLength(1);
-      expect(teardownCalls[0]).toEqual({ runId: result.runId, targetBaseUrl: site.baseUrl });
+      const teardownCtx = teardownCalls[0];
+      expect(teardownCtx?.runId).toBe(result.runId);
+      expect(teardownCtx?.targetBaseUrl).toBe(site.baseUrl);
+      // Both timestamps should bracket the run's actual wall-clock execution —
+      // proves they're the real run's own timing, not e.g. both `Date.now()`
+      // grabbed at the same instant.
+      expect(teardownCtx?.runStartedAt).toBeGreaterThanOrEqual(before);
+      expect(teardownCtx?.runEndedAt).toBeGreaterThanOrEqual(teardownCtx?.runStartedAt ?? 0);
+      expect(teardownCtx?.runEndedAt).toBeLessThanOrEqual(Date.now());
 
       expect(db.getRun(result.runId)?.checkpointContext).toEqual({
         "on-dashboard": { goalId: "reach-dashboard", description: "On the dashboard." },

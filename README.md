@@ -21,13 +21,13 @@ Two AI tiers currently exist: an **actor** tier that drives a real browser one p
 
 **Cross-session analysis** — a separate `drover analyze <run-id>` command loads every session from a completed run, builds a compact digest per session (derived metrics + capped action trace + in-session findings), and sends them to Sonnet via the real Anthropic **Batch API** (50% off, no latency requirement — this is post-hoc analysis). Digests are split into groups of at most `--sessions-per-chunk` (default 25) sessions, each its own concurrent Batch request, rather than one prompt covering every session — keeps a large run's prompt size bounded, at the cost of only correlating patterns *within* a chunk (a pattern spanning two sessions in different chunks would be missed; see [Concurrency](#concurrency) for the analogous trade-off on the actor-tier side). It looks for patterns no single actor session would notice: duplicate dead-end labels, a route several personas independently stumble on, a checkpoint that's technically reachable but abnormally slow. Malformed model output is validated, logged, and skipped — it never crashes the run. Findings are reconciled a second time once written, since cross-session findings don't exist until `analyze` has run (see [Cross-run finding matching](#cross-run-finding-matching) below).
 
-**Reporting** — `drover report <run-id> --db <path> [--out report.md]` reads a run's SQLite data (no re-simulation, no re-analysis) and builds a markdown report: a findings summary table (severity, type, session count, status), the same findings broken out by flow (`Goal.id`), run metadata (config dimensions, actual actor/analyst spend vs. budget), and a "since last run" new/still-open/resolved count. Findings from both tables merge into one row per `matchKey`; each row links to its evidence (screenshot paths, event ids) in a separate appendix rather than inlining it. Prints to stdout without `--out`. Surfaces a warning when `drover analyze` hasn't run yet for the run, since cross-session findings/status may be incomplete until it has.
+**Reporting** — `drover report <run-id> --db <path> [--out report.md]` reads a run's SQLite data (no re-simulation, no re-analysis) and builds a markdown report: a findings summary table (severity, type, session count, status), the same findings broken out by flow (`Goal.id`), run metadata (config dimensions, actual actor/analyst spend vs. budget), a "since last run" new/still-open/resolved count, and a "Load test results (Stampede)" section folding in every `drover stampede` run recorded against this discovery run (percentiles/error rates per route/concurrency, one subsection per replay). Findings from both tables merge into one row per `matchKey`; each row links to its evidence (screenshot paths, event ids) in a separate appendix rather than inlining it. Prints to stdout without `--out`. Surfaces a warning when `drover analyze` hasn't run yet for the run, since cross-session findings/status may be incomplete until it has.
 
 **Stampede mode** — a distinct `drover stampede <run-id> --db <path>` command: scripted, non-reasoning replay of routes a *discovery* run already found, at increasing concurrency. No LLM calls anywhere — the only real safety property to know is that the target is always the source run's own `targetBaseUrl`, never an arbitrary URL you pass in. It pulls the distinct `navigate` targets a discovery run recorded, then for each `--concurrency` level (default `1,5,10`, run one at a time so the comparison is clean) spins up that many independent browser contexts, each making `--iterations-per-worker` (default 3) timed passes through every route. Results — sample count, error count, and p50/p95/p99 response times per (route, concurrency) pair — go to their own `stampede_runs`/`stampede_route_results` tables (not the discovery `runs`/`sessions`/`action_events` tables, which have no natural home for load-test traffic) and print to the console. Needs no credentials at all — `npm run smoke:stampede` runs it for real, unlike every other smoke script.
 
 ## What it doesn't do yet
 
-Stampede results aren't folded into `drover report` (console output only, for now), and only a page's own `navigate` targets get replayed — not full click/fill goal sequences, since that would mutate app data at load-test volume with no teardown to clean it up. See `GAPS.md`.
+Only a page's own `navigate` targets get replayed by Stampede — not full click/fill goal sequences, since that would mutate app data at load-test volume with no teardown to clean it up. See `GAPS.md`.
 
 ## Quickstart
 
@@ -106,13 +106,18 @@ interface DomainPack {
   goals: Goal[];
   goalWeightsByPersona: Record<string, WeightedGoal[]>;
   dataPolicy: "synthetic-only" | "restricted";
-  teardown?: (ctx: { runId: string; targetBaseUrl: string }) => Promise<void>;
+  teardown?: (ctx: {
+    runId: string;
+    targetBaseUrl: string;
+    runStartedAt: number;   // epoch ms
+    runEndedAt: number;     // epoch ms, taken right as teardown is invoked
+  }) => Promise<void>;
 }
 ```
 
 Each persona draws from a **weighted goal pool** per session rather than one fixed flow — this is what makes a run reflect "what do real users actually do, in what proportions" instead of testing a single scripted path.
 
-`teardown` is optional, runs finally-style after a completed/budget-stopped/crashed run, and is called with only `{ runId, targetBaseUrl }` — Drover keeps no record of which app-side rows a run actually created, so correlating and deleting them (tag synthetic data with the runId at fill-time, or sweep by timestamp window) is the pack author's responsibility.
+`teardown` is optional and runs finally-style after a completed/budget-stopped/crashed run alike. Drover keeps no record of which app-side rows a run actually created, so correlating and deleting them is the pack author's responsibility, via one of two strategies: tag synthetic data with the `runId` at fill-time (needs nothing further from Drover), or sweep by timestamp window using `runStartedAt`/`runEndedAt` (which Drover provides precisely so this doesn't need separate SQLite access from inside the hook).
 
 ### Checkpoint detector DSL
 

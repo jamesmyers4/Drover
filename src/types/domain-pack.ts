@@ -23,10 +23,25 @@ export interface Checkpoint {
   detector: string;
 }
 
-/** Passed to a DomainPack's teardown hook (Session 4). */
+/**
+ * Passed to a DomainPack's teardown hook (Session 4). `runStartedAt`/
+ * `runEndedAt` (added per GAPS.md's S4 entry) exist specifically so a pack
+ * author can implement the "sweep by timestamp window" correlation strategy
+ * without needing separate SQLite access — Drover doesn't track which
+ * app-side rows a run actually created, but it does always know when the
+ * run started and (as of the moment teardown is invoked) ended, so at least
+ * one of the two documented strategies is fully supported out of the box.
+ * The other strategy (tagging synthetic data with `runId` at fill-time)
+ * needs nothing further from Drover — it's already just `runId` plus
+ * whatever the pack itself writes into the app during a session.
+ */
 export interface DomainPackTeardownContext {
   runId: string;
   targetBaseUrl: string;
+  /** Raw epoch milliseconds — this run's own Run.startedAt. */
+  runStartedAt: number;
+  /** Raw epoch milliseconds, taken right as the run finishes and teardown is invoked. */
+  runEndedAt: number;
 }
 
 export interface DomainPack {

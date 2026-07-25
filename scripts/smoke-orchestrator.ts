@@ -71,7 +71,9 @@ const domainPack: DomainPack = {
   },
   dataPolicy: "synthetic-only",
   teardown: async (ctx) => {
-    console.log(\`[teardown] wiping staging data created by run \${ctx.runId} against \${ctx.targetBaseUrl}\`);
+    console.log(
+      \`[teardown] wiping staging data created by run \${ctx.runId} against \${ctx.targetBaseUrl} (window: \${new Date(ctx.runStartedAt).toISOString()} - \${new Date(ctx.runEndedAt).toISOString()})\`,
+    );
   },
 };
 
