@@ -300,10 +300,37 @@ tests.** If a test can't be written without a source change (Session 10's
 CLI exports are the one known exception, called out explicitly below), stop
 and log it back here rather than making the change unprompted.
 
-### Session 1 — Actor tier: route map + prompt assembly
+### Session 1 — Actor tier: route map + prompt assembly — CLOSED 2026-07-25
 
 Close `src/actor/route-map.ts` (16%) and `src/actor/prompt.ts` (69.6%,
 currently no dedicated test file at all).
+
+**Disposition:** `src/actor/route-map.ts` now 96%/90%/100%/100%
+(stmts/branch/funcs/lines; up from 16%/10%/33.3%) via new
+`tests/actor/route-map.test.ts`. `src/actor/prompt.ts` now 100% across the
+board (up from 69.6%/50%/100%) via new `tests/actor/prompt.test.ts`. Real
+finding along the way, not assumed: `extractRoutes`'s own doc comment
+("Not a resolvable URL (mailto:, javascript:, etc.) — skip.") is wrong —
+`new URL("mailto:...", base)` and `new URL("javascript:...", base)` both
+parse successfully as absolute URLs with their own scheme rather than
+throwing, so these links are *not* actually skipped; they end up in the
+route list with an opaque, path-shaped value (e.g. `mailto:a@b.com` becomes
+route `a@b.com`). Verified directly against Node's URL implementation
+before writing the test, not just read off the source. Per this file's own
+"do not fix source" instruction, the test documents the real behavior
+instead of the comment's claimed behavior — not logged to `GAPS.md` since
+it's cosmetic (a stale comment, not an incorrect security/correctness
+behavior: mailto:/javascript: links ending up as low-value route-map noise
+isn't a real problem). `extractRoutes` itself was not exported to test it
+directly — the plan's suggested test target — since `buildRouteMapContext`
+(the actually-exported function) already exercises every `extractRoutes`
+branch (dedup via `Set`, `MAX_ROUTES` cap, catch-and-skip on a genuinely
+malformed URL like `http://[invalid`) without needing a source change. One
+branch left uncovered in `route-map.ts` (line 24, `if (!href) continue;`):
+structurally near-unreachable given the href-capturing regex group requires
+at least one non-empty, non-quote character to match at all — not worth
+forcing artificially. Full disposition and the actual mailto:/javascript:
+finding recorded in `TESTING.md`'s decisions log.
 
 - New `tests/actor/route-map.test.ts`: unit-test `extractRoutes` directly
   against small HTML strings (relative hrefs, absolute hrefs, `mailto:`/

@@ -8,8 +8,8 @@ and `CONTEXT.md` first, same as any other work in this repo.
 
 ## What exists
 
-- **Unit/integration tests** — 18 files, 118 tests (`vitest run` / `npm
-  test`, current as of 2026-07-24 — trust a fresh `npm test` run's own
+- **Unit/integration tests** — 26 files, 196 tests (`vitest run` / `npm
+  test`, current as of 2026-07-25 — trust a fresh `npm test` run's own
   summary over this number if it's drifted). Real coverage, not
   placeholder: `tests/fixtures/site.ts` is a local `node:http` fixture
   server that browser-driven tests launch real Playwright chromium
@@ -513,3 +513,54 @@ and this file's new status snapshot) rather than duplicated into
 Testing buildout (Sessions 1–4) is now complete. Stopping here per this
 session's scope — Session 5 (`BUILD-STATE.md`'s next feature session,
 reporting) is out of scope for this file's work and was not started.
+
+**2026-07-25 (TESTING-GAPS.md Session 1 — actor tier: route map + prompt
+assembly)** — First session of the separate, dated `TESTING-GAPS.md` coverage
+sweep plan (its own session numbering, unrelated to Sessions 1–4 above).
+Closed the two worst-covered actor-tier files:
+
+- New `tests/actor/route-map.test.ts`: drives `buildRouteMapContext` (the
+  only exported entry point) with a fake `TreelineAdapter` rather than
+  exporting `extractRoutes` just to unit-test it directly — every
+  `extractRoutes` branch (href-regex matching, `Set`-based dedup, the
+  `MAX_ROUTES` cap, and the catch-and-skip on a genuinely malformed URL) is
+  reachable through `buildRouteMapContext` alone. Also covers: `"new"`
+  familiarity returning `undefined` without ever calling the adapter, empty/
+  no-links HTML, `resolveSeedUrl` resolving with `html: null`, and
+  `resolveSeedUrl` rejecting (caught, not thrown). `src/actor/route-map.ts`
+  went from 16%/10%/33.3%/— (stmts/branch/funcs) to 96%/90%/100%/100%
+  (stmts/branch/funcs/lines).
+- Real finding made while writing the malformed-link test: the module's own
+  doc comment above `extractRoutes`'s catch block claims mailto:/javascript:
+  links are skipped as "not a resolvable URL" — verified against Node's
+  actual `URL` constructor (both `new URL("mailto:...", base)` and
+  `new URL("javascript:...", base)` parse successfully as absolute URLs with
+  their own scheme, they never throw) that this is wrong: these links are
+  *not* skipped, they land in the route list with an opaque, path-shaped
+  value (e.g. `mailto:a@b.com` → route `a@b.com`). Per this session's own
+  "don't fix source" constraint, added a test that documents the real
+  (surprising) behavior instead of the comment's claimed behavior, rather
+  than silently matching the wrong assumption or changing the source
+  comment. Not logged to `GAPS.md` — cosmetic (stale comment vs. actual
+  low-value route-map noise), not a correctness/security issue.
+- New `tests/actor/prompt.test.ts` (no prior file existed): all three
+  `techSavvinessFraming` bands, all three `deviceFraming` values, all three
+  `familiarityFraming` values, both branches of the `routeMapContext`-present
+  check in `buildStaticSystemPrompt`, and `buildActionPrompt`'s empty-vs-
+  non-empty `recentHistory` fallback. `src/actor/prompt.ts` went from
+  69.6%/50%/100% to 100%/100%/100%.
+- Test count went from 24 files/173 tests (this sweep's own recorded
+  baseline) to 26 files/196 tests. `npm run typecheck`, `npm run lint`, and
+  `npm test` all clean. `@vitest/coverage-v8` was already present in
+  `node_modules` from the original sweep's `--no-save` install — reused it
+  to confirm the before/after numbers above rather than re-installing;
+  Session 10 (per `TESTING-GAPS.md`) still owns making it a committed
+  `devDependency`.
+- Also refreshed this file's stale "18 files / 118 tests" snapshot line
+  above to the current count while touching this file anyway, per
+  `TESTING-GAPS.md`'s own Session 10 note flagging that drift — a
+  documentation nit, not new coverage work.
+
+`TESTING-GAPS.md`'s Session 1 entry updated in place (struck through with a
+"CLOSED 2026-07-25" disposition) rather than deleted, matching this file's
+own historical-record convention.
