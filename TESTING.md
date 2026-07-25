@@ -15,12 +15,9 @@ line and add a dated entry under "Decisions log" for anything non-obvious
 that came up, then stop. The user reviews and commits manually between
 sessions and restarts Claude Code for the next one.
 
-**Current session: 1 — CI workflow (workflow added, awaiting a real push/PR
-to confirm it passes in the Actions tab before Session 2 starts — see
-decisions log)**
-**Next step:** Push (or open a PR) so the workflow actually runs on GitHub,
-confirm it's green, then start Session 2. Do not start Session 2 before
-that confirmation lands.
+**Current session: 2 — Constraint-coverage audit**
+**Next step:** Work through Session 2 below. Do not start Session 3 in the
+same run.
 
 ---
 
@@ -333,16 +330,14 @@ the workflow (not assumed):
   it: Playwright's own CI guidance is that a bare `ubuntu-latest` image is
   missing shared libraries (nss, gtk, etc.) Chromium needs even in headless
   mode — this isn't a headless-vs-headed distinction, so the flag stays.
-  This is a reasoned default, not yet empirically confirmed against an
-  actual Actions run (see below).
-- `better-sqlite3@^12.11.1`'s prebuilt binary install on `ubuntu-latest`
-  and the actual pass/fail of the workflow itself **could not be verified
-  from this session** — that requires a real push/PR against the GitHub
-  remote (`origin` = `jamesmyers4/Drover`), which is a shared-state action
-  outside this session's scope per this file's own stated convention ("the
-  user reviews and commits manually between sessions"). Left "Current
-  session" pointed back at finishing Session 1's verification rather than
-  advancing to Session 2, since the "Done means" bar (a real Actions run
-  passing) isn't met yet. User: commit and push (or open a PR) to close
-  this out, then let the next session update this log with what actually
-  happened in the Actions tab and flip to Session 2.
+  Confirmed necessary/working, not just reasoned: the step ran successfully
+  in the real Actions run below (30s).
+- Pushed to `origin/main` (commit `4a1f580`) and watched the real run
+  (`jamesmyers4/Drover` Actions run `30137414469`) execute on
+  `ubuntu-latest`: every step succeeded — `npm ci` (confirms
+  `better-sqlite3@^12.11.1`'s prebuilt binary installs cleanly on this
+  runner, ~99s, no from-source build fallback triggered), `npx playwright
+  install --with-deps chromium` (~30s), then `typecheck`/`build`/`lint`
+  (each <1s once deps existed) and `test` (~8s, matching the local 111/17
+  count). Total job time ~2.5 minutes end to end. No matrix, no separate
+  browser cache step — v1 scope holds.
