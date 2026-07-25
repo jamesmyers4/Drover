@@ -22,4 +22,10 @@ export type {
   InSessionFindingType,
 } from "./findings.js";
 export type { PersonaArchetype, WeightedGoal } from "./persona.js";
-export type { PersonaSession, Run, RunStatus, SessionStatus } from "./run.js";
+export type {
+  CheckpointContextEntry,
+  PersonaSession,
+  Run,
+  RunStatus,
+  SessionStatus,
+} from "./run.js";

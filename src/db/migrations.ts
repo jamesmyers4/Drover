@@ -93,4 +93,11 @@ export const migrations: Migration[] = [
       CREATE INDEX idx_finding_status_match ON finding_status_history(match_key, status);
     `,
   },
+  {
+    version: 2,
+    name: "run-checkpoint-context",
+    sql: `
+      ALTER TABLE runs ADD COLUMN checkpoint_context_json TEXT;
+    `,
+  },
 ];

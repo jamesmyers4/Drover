@@ -84,6 +84,63 @@ describe("runAnalyst", () => {
     expect(analyzeSpy).not.toHaveBeenCalled();
   });
 
+  it("passes the run's checkpointContext through to the analyst prompt", async () => {
+    const run: Run = {
+      id: newId(),
+      appName,
+      config,
+      status: "completed",
+      startedAt: 1000,
+      checkpointContext: {
+        "cp-signup-complete": { goalId: "g1", description: "User submits the signup form" },
+      },
+    };
+    db.insertRun(run);
+    const session: PersonaSession = {
+      id: newId(),
+      runId: run.id,
+      personaId: "p0",
+      goalId: "g1",
+      status: "completed",
+      startedAt: 1000,
+      endedAt: 2000,
+    };
+    db.insertSession(session);
+    const eventId = db.insertActionEvent({
+      sessionId: session.id,
+      timestamp: 1200,
+      actionType: "navigate",
+      target: "/signup/complete",
+      reasoning: "finishing signup",
+    });
+    db.updateActionEventCheckpoint(eventId, "cp-signup-complete");
+
+    let capturedUserPrompt = "";
+    const provider = {
+      provider: "captured",
+      model: "captured",
+      analyze: async (req: { systemPrompt: string; userPrompt: string }) => {
+        capturedUserPrompt = req.userPrompt;
+        return {
+          findings: [],
+          usage: {
+            inputTokens: 0,
+            outputTokens: 0,
+            cacheWriteTokens: 0,
+            cacheReadTokens: 0,
+            costUsd: 0,
+          },
+        };
+      },
+    };
+
+    await runAnalyst({ db, runId: run.id, provider });
+
+    expect(capturedUserPrompt).toContain(
+      'cp-signup-complete ("User submits the signup form", goal: g1)',
+    );
+  });
+
   it("writes validated cross-session findings referencing the right sessions, and reconciles them", async () => {
     const { run, sessions } = makeRunWithSessions(2);
     const [s1, s2] = sessions;

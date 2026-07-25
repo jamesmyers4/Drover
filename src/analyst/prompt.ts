@@ -5,6 +5,7 @@
  * caching (nothing repeats within one analyst call), no streaming.
  */
 
+import type { CheckpointContextEntry } from "../types/index.js";
 import type { SessionDigest } from "./digest.js";
 
 export function buildAnalystSystemPrompt(): string {
@@ -21,12 +22,18 @@ export function buildAnalystSystemPrompt(): string {
   ].join("\n\n");
 }
 
-export function buildAnalystUserPrompt(digests: SessionDigest[]): string {
-  const blocks = digests.map((d) => formatDigest(d));
+export function buildAnalystUserPrompt(
+  digests: SessionDigest[],
+  checkpointContext?: Record<string, CheckpointContextEntry>,
+): string {
+  const blocks = digests.map((d) => formatDigest(d, checkpointContext));
   return `Session digests for this run (${digests.length} session(s)):\n\n${blocks.join("\n\n---\n\n")}`;
 }
 
-function formatDigest(d: SessionDigest): string {
+function formatDigest(
+  d: SessionDigest,
+  checkpointContext?: Record<string, CheckpointContextEntry>,
+): string {
   const metrics = [
     `${d.actionCount} action(s)`,
     d.totalDurationMs !== undefined ? `total duration ${d.totalDurationMs}ms` : undefined,
@@ -44,7 +51,11 @@ function formatDigest(d: SessionDigest): string {
   const checkpointIds = Object.keys(d.checkpointReachTimesMs);
   if (checkpointIds.length > 0) {
     const reachLines = checkpointIds
-      .map((id) => `  - ${id}: ${d.checkpointReachTimesMs[id]}ms`)
+      .map((id) => {
+        const context = checkpointContext?.[id];
+        const label = context ? `${id} ("${context.description}", goal: ${context.goalId})` : id;
+        return `  - ${label}: ${d.checkpointReachTimesMs[id]}ms`;
+      })
       .join("\n");
     lines.push(`Checkpoint reach times (elapsed ms from session start):\n${reachLines}`);
   }

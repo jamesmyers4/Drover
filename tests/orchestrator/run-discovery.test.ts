@@ -3,7 +3,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest
 import { ScriptedModelProvider } from "../../src/actor/provider.js";
 import { launchBrowser } from "../../src/browser/index.js";
 import { DroverDb } from "../../src/db/database.js";
-import { runDiscovery } from "../../src/orchestrator/run-discovery.js";
+import { buildCheckpointContext, runDiscovery } from "../../src/orchestrator/run-discovery.js";
 import { createTreelineAdapter, type TreelineAdapter } from "../../src/treeline/adapter.js";
 import type { DomainPack, DomainPackTeardownContext, SimConfig } from "../../src/types/index.js";
 import { type FixtureSite, startFixtureSite } from "../fixtures/site.js";
@@ -144,6 +144,11 @@ describe("runDiscovery", () => {
 
       expect(teardownCalls).toHaveLength(1);
       expect(teardownCalls[0]).toEqual({ runId: result.runId, targetBaseUrl: site.baseUrl });
+
+      expect(db.getRun(result.runId)?.checkpointContext).toEqual({
+        "on-dashboard": { goalId: "reach-dashboard", description: "On the dashboard." },
+        never: { goalId: "impossible", description: "Never." },
+      });
     },
     TIMEOUT,
   );
@@ -309,5 +314,53 @@ describe("runDiscovery", () => {
     // The guard must fire before any run row is written — a rejected config
     // shouldn't leave a "running" run behind for a pack author to find later.
     expect(insertRunSpy).not.toHaveBeenCalled();
+  });
+});
+
+describe("buildCheckpointContext", () => {
+  it("maps every checkpoint id to its owning goal id and description", () => {
+    const domainPack: DomainPack = {
+      appName: "fixture-app",
+      personas: [],
+      goals: [
+        {
+          id: "goal-a",
+          description: "Goal A.",
+          actionBudget: 5,
+          checkpoints: [
+            { id: "cp-1", description: "First checkpoint.", detector: "url:/one" },
+            { id: "cp-2", description: "Second checkpoint.", detector: "url:/two" },
+          ],
+          successCheckpointId: "cp-2",
+        },
+        {
+          id: "goal-b",
+          description: "Goal B.",
+          actionBudget: 5,
+          checkpoints: [{ id: "cp-3", description: "Third checkpoint.", detector: "url:/three" }],
+          successCheckpointId: "cp-3",
+        },
+      ],
+      goalWeightsByPersona: {},
+      dataPolicy: "synthetic-only",
+    };
+
+    expect(buildCheckpointContext(domainPack)).toEqual({
+      "cp-1": { goalId: "goal-a", description: "First checkpoint." },
+      "cp-2": { goalId: "goal-a", description: "Second checkpoint." },
+      "cp-3": { goalId: "goal-b", description: "Third checkpoint." },
+    });
+  });
+
+  it("returns an empty map for a domain pack with no goals", () => {
+    const domainPack: DomainPack = {
+      appName: "fixture-app",
+      personas: [],
+      goals: [],
+      goalWeightsByPersona: {},
+      dataPolicy: "synthetic-only",
+    };
+
+    expect(buildCheckpointContext(domainPack)).toEqual({});
   });
 });

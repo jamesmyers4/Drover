@@ -90,7 +90,7 @@ export async function runAnalyst(opts: RunAnalystOptions): Promise<RunAnalystRes
 
   const digests = sessions.map((s) => buildSessionDigest(db, s));
   const systemPrompt = buildAnalystSystemPrompt();
-  const userPrompt = buildAnalystUserPrompt(digests);
+  const userPrompt = buildAnalystUserPrompt(digests, run.checkpointContext);
 
   const ceilingUsd = run.config.budget.analystCeilingUsd;
   if (ceilingUsd !== undefined) {

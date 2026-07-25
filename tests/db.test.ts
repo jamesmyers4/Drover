@@ -65,6 +65,27 @@ describe("DroverDb", () => {
     expect(db.getRun(run.id)).toEqual(run);
   });
 
+  it("round-trips a run's checkpointContext when present", () => {
+    const run: Run = {
+      ...makeRun(),
+      checkpointContext: {
+        "cp-signup-complete": {
+          goalId: "signup-flow",
+          description: "User submits the signup form",
+        },
+      },
+    };
+    db.insertRun(run);
+    expect(db.getRun(run.id)).toEqual(run);
+  });
+
+  it("omits checkpointContext from a round-tripped run when it was never supplied", () => {
+    const run = makeRun();
+    db.insertRun(run);
+    const fetched = db.getRun(run.id);
+    expect(fetched).not.toHaveProperty("checkpointContext");
+  });
+
   it("updates run status and end time", () => {
     const run = makeRun();
     db.insertRun(run);

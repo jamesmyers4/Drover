@@ -7,6 +7,7 @@ import { randomUUID } from "node:crypto";
 import Database from "better-sqlite3";
 import type {
   ActionEvent,
+  CheckpointContextEntry,
   CrossSessionFinding,
   FindingStatusRecord,
   InSessionFinding,
@@ -66,7 +67,7 @@ export class DroverDb {
   insertRun(run: Run): void {
     this.db
       .prepare(
-        "INSERT INTO runs (id, app_name, config_json, status, started_at, ended_at) VALUES (?, ?, ?, ?, ?, ?)",
+        "INSERT INTO runs (id, app_name, config_json, status, started_at, ended_at, checkpoint_context_json) VALUES (?, ?, ?, ?, ?, ?, ?)",
       )
       .run(
         run.id,
@@ -75,6 +76,7 @@ export class DroverDb {
         run.status,
         run.startedAt,
         run.endedAt ?? null,
+        run.checkpointContext !== undefined ? JSON.stringify(run.checkpointContext) : null,
       );
   }
 
@@ -93,6 +95,7 @@ export class DroverDb {
           status: Run["status"];
           started_at: number;
           ended_at: number | null;
+          checkpoint_context_json: string | null;
         }
       | undefined;
     if (!row) return undefined;
@@ -103,6 +106,12 @@ export class DroverDb {
       status: row.status,
       startedAt: row.started_at,
       ...(row.ended_at !== null && { endedAt: row.ended_at }),
+      ...(row.checkpoint_context_json !== null && {
+        checkpointContext: JSON.parse(row.checkpoint_context_json) as Record<
+          string,
+          CheckpointContextEntry
+        >,
+      }),
     };
   }
 

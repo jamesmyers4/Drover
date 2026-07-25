@@ -30,7 +30,14 @@ import {
 import { BrowserSession, launchBrowser } from "../browser/index.js";
 import { type DroverDb, newId } from "../db/database.js";
 import { createTreelineAdapter, type TreelineAdapter } from "../treeline/adapter.js";
-import type { DomainPack, ModelRoute, Run, RunStatus, SimConfig } from "../types/index.js";
+import type {
+  CheckpointContextEntry,
+  DomainPack,
+  ModelRoute,
+  Run,
+  RunStatus,
+  SimConfig,
+} from "../types/index.js";
 import { type ReconciliationSummary, reconcileRunFindings } from "./reconcile.js";
 import { buildSchedule, type ScheduledSession } from "./schedule.js";
 
@@ -85,6 +92,25 @@ function assertConcurrencyCapSupported(concurrencyCap: number | undefined): void
   }
 }
 
+/**
+ * Snapshots every checkpoint id's originating goal + description from the
+ * domain pack, so the analyst tier (`src/analyst/prompt.ts`) can show
+ * something more useful than a bare checkpoint id string (GAPS.md). Taken at
+ * run-creation time, not looked up live from the pack at `drover analyze`
+ * time, since a pack file can change or move between the two commands.
+ */
+export function buildCheckpointContext(
+  domainPack: DomainPack,
+): Record<string, CheckpointContextEntry> {
+  const context: Record<string, CheckpointContextEntry> = {};
+  for (const goal of domainPack.goals) {
+    for (const checkpoint of goal.checkpoints) {
+      context[checkpoint.id] = { goalId: goal.id, description: checkpoint.description };
+    }
+  }
+  return context;
+}
+
 export async function runDiscovery(opts: RunDiscoveryOptions): Promise<RunDiscoveryResult> {
   const { db, domainPack, config } = opts;
   // Enforced once at config-load time, not per-session (BUILD-STATE.md S3 note for S4).
@@ -102,6 +128,7 @@ export async function runDiscovery(opts: RunDiscoveryOptions): Promise<RunDiscov
     config,
     status: "running",
     startedAt: Date.now(),
+    checkpointContext: buildCheckpointContext(domainPack),
   };
   db.insertRun(run);
 
