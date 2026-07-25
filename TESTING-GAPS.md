@@ -454,7 +454,7 @@ object/non-array input guard, and the `createAnalystProvider` `opts`
 branch) weren't in this session's scope and weren't pursued. Full detail in
 `TESTING.md`'s decisions log.
 
-### Session 4 — Analyst tier: remaining small gaps
+### Session 4 — Analyst tier: remaining small gaps — CLOSED 2026-07-25
 
 - `tests/analyst/digest.test.ts`: one new case with 3+ events where a
   *later* gap is smaller than an earlier one, asserting `longestGapMs`
@@ -467,6 +467,23 @@ branch) weren't in this session's scope and weren't pursued. Full detail in
   exercised against a live API," but doesn't actually need a live API, just
   a mocked one, to prove the arithmetic (`result.input_tokens` flowing
   through correctly).
+
+**Disposition:** Both closed as specified. `src/analyst/digest.ts` now
+96.66%/96.42%/100%/100% (stmts/branch/funcs/lines) — the one remaining
+branch (line 64, `if (!prev || !cur) continue;`) is a defensive guard
+structurally unreachable given the loop's own bounds already guarantee both
+exist, not pursued. `src/analyst/budget.ts` now 100% statements (up from
+already-100%, branch coverage now 66.66%) via two new cases:
+`createApiTokenCounter`'s real success path (mocked `countTokens` resolving
+with `input_tokens`, asserted both the returned count and the exact
+`{model, system, messages}` request shape sent) and a case proving
+`estimateAnalystCostUsd`'s *default* `countTokens` argument (i.e. no
+explicit override — `createApiTokenCounter(model)` itself) reflects the
+mocked exact count end to end, not just the already-covered injected-
+`TokenCounter` path. One remaining branch (line 77, the `err instanceof
+Error ? err.message : String(err)` non-`Error`-throw half inside the
+fallback's `console.error`) not pursued — out of this session's scope.
+Full detail in `TESTING.md`'s decisions log.
 
 ### Session 5 — Orchestrator: error isolation + the schedule fallback
 

@@ -88,6 +88,37 @@ describe("buildSessionDigest", () => {
     ]);
   });
 
+  it("keeps the largest gap even when a later gap is smaller, rather than overwriting with the latest", () => {
+    const session = makeSession();
+    db.insertActionEvent({
+      sessionId: session.id,
+      timestamp: 1100,
+      actionType: "navigate",
+      target: "/a",
+      reasoning: "start",
+    });
+    db.insertActionEvent({
+      sessionId: session.id,
+      timestamp: 2000,
+      actionType: "click",
+      target: "#btn",
+      reasoning: "after a long pause",
+    });
+    db.insertActionEvent({
+      sessionId: session.id,
+      timestamp: 2100,
+      actionType: "click",
+      target: "#next",
+      reasoning: "quickly after that",
+    });
+
+    const digest = buildSessionDigest(db, session);
+
+    // Gaps are 900 (1100 -> 2000) then 100 (2000 -> 2100) — the smaller,
+    // later gap must not overwrite the larger, earlier one.
+    expect(digest.longestGapMs).toBe(900);
+  });
+
   it("falls back to the last event's timestamp when the session has no endedAt", () => {
     const session = makeSession({ status: "running", endedAt: undefined });
     db.insertActionEvent({

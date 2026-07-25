@@ -8,7 +8,7 @@ and `CONTEXT.md` first, same as any other work in this repo.
 
 ## What exists
 
-- **Unit/integration tests** — 26 files, 214 tests (`vitest run` / `npm
+- **Unit/integration tests** — 26 files, 217 tests (`vitest run` / `npm
   test`, current as of 2026-07-25 — trust a fresh `npm test` run's own
   summary over this number if it's drifted). Real coverage, not
   placeholder: `tests/fixtures/site.ts` is a local `node:http` fixture
@@ -653,3 +653,43 @@ entirely untested). Closed:
 
 `TESTING-GAPS.md`'s Session 3 entry updated in place with a "CLOSED
 2026-07-25" disposition, same convention as Sessions 1–2.
+
+**2026-07-25 (TESTING-GAPS.md Session 4 — analyst tier: remaining small
+gaps)** — Closed the two small remaining `src/analyst/digest.ts` and
+`src/analyst/budget.ts` gaps:
+
+- Added one case to `tests/analyst/digest.test.ts`: three events producing
+  gaps of 900ms then 100ms (in that order), asserting `longestGapMs` stays
+  at 900 — proves `buildSessionDigest`'s tracking loop actually compares
+  each new gap against the running max (`gap > longestGapMs`) rather than
+  just overwriting with whatever the latest gap happened to be, which every
+  prior test's monotonically-increasing gap sequences couldn't distinguish
+  from a bug. `src/analyst/digest.ts` went to 96.66%/96.42%/100%/100%
+  (stmts/branch/funcs/lines) — the one remaining branch (line 64's
+  `!prev || !cur` guard) is structurally unreachable given the loop's own
+  bounds, not pursued.
+- Extended `tests/analyst/budget.test.ts` with the same
+  `vi.mock("@anthropic-ai/sdk", ...)` whole-module-mock pattern Sessions 3
+  established (mocking `messages.countTokens` this time), closing a gap
+  `CLAUDE.md`/`GAPS.md` both already flagged as "never exercised against a
+  live API": `createApiTokenCounter`'s real success path (asserts both the
+  returned `input_tokens` count and the exact `{model, system, messages}`
+  request shape sent — the same shape the real Batch request uses, per the
+  module's own doc comment) and a case proving `estimateAnalystCostUsd`'s
+  *default* argument (`createApiTokenCounter(model)` itself, not an
+  injected fake) reflects a mocked exact count end to end — the existing
+  suite only ever exercised the explicit-override and heuristic-fallback
+  paths, never this default-real-path branch. Needed no real
+  `ANTHROPIC_API_KEY` — a mocked `countTokens` response is enough to prove
+  the arithmetic. `src/analyst/budget.ts` branch coverage went to 66.66%
+  (statements already at 100%); the one remaining branch (line 77's
+  non-`Error`-throw half of the fallback's `console.error` message
+  formatting) not pursued.
+- Test count went from 26 files/214 tests to 26 files/217 tests (3 new
+  cases: 1 in `digest.test.ts`, 2 in `budget.test.ts`). `npm run
+  typecheck`, `npm run lint`, and `npm test` all clean.
+
+`TESTING-GAPS.md`'s Session 4 entry updated in place with a "CLOSED
+2026-07-25" disposition, same convention as Sessions 1–3. This closes out
+the analyst tier's portion of this sweep — Sessions 5 onward move to the
+orchestrator, DB, report, stampede, treeline, browser, and CLI layers.

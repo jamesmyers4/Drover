@@ -1,11 +1,27 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { UnknownModelPricingError } from "../../src/actor/budget.js";
-import {
+import type { TokenCounter } from "../../src/analyst/budget.js";
+
+// The real SDK's `messages` is an instance property set in the constructor,
+// not a prototype getter, so it can't be spied on after construction — mock
+// the whole module instead, same pattern tests/actor/provider.test.ts and
+// tests/analyst/provider.test.ts already established. This lets
+// createApiTokenCounter's real success path (CLAUDE.md/GAPS.md: "never
+// exercised against a live API") be proven without real credentials — a
+// mocked countTokens response is enough to verify the arithmetic.
+const { mockCountTokens } = vi.hoisted(() => ({ mockCountTokens: vi.fn() }));
+vi.mock("@anthropic-ai/sdk", () => ({
+  default: vi.fn().mockImplementation(function MockAnthropic(this: { messages: unknown }) {
+    this.messages = { countTokens: mockCountTokens };
+  }),
+}));
+
+const {
   AnalystBudgetExceededError,
+  createApiTokenCounter,
   estimateAnalystCostUsd,
   estimateTokens,
-  type TokenCounter,
-} from "../../src/analyst/budget.js";
+} = await import("../../src/analyst/budget.js");
 
 describe("estimateTokens", () => {
   it("estimates roughly 4 chars per token, rounded up", () => {
@@ -60,6 +76,33 @@ describe("estimateAnalystCostUsd", () => {
     );
     // Same heuristic-math assertion as the no-tokenizer discount test above.
     expect(withFallback).toBeCloseTo(0.0015, 5);
+  });
+});
+
+describe("createApiTokenCounter (mocked SDK — the real countTokens success path)", () => {
+  it("returns the API's input_tokens count, requesting the exact system+messages shape the real Batch request sends", async () => {
+    mockCountTokens.mockResolvedValueOnce({ input_tokens: 1234 });
+    const counter = createApiTokenCounter("claude-sonnet-5");
+
+    const count = await counter("system prompt text", "user prompt text");
+
+    expect(count).toBe(1234);
+    expect(mockCountTokens).toHaveBeenCalledWith({
+      model: "claude-sonnet-5",
+      system: "system prompt text",
+      messages: [{ role: "user", content: "user prompt text" }],
+    });
+  });
+
+  it("estimateAnalystCostUsd uses this real path by default (no countTokens override) and reflects its exact count", async () => {
+    mockCountTokens.mockResolvedValueOnce({ input_tokens: 1_000_000 });
+
+    const costUsd = await estimateAnalystCostUsd("claude-sonnet-5", "sys", "user", 0);
+
+    // 1,000,000 input tokens at $3/M list price, batch-discounted 50% — same
+    // arithmetic the injected-TokenCounter test above already proves, but
+    // driven through the real default path this time.
+    expect(costUsd).toBeCloseTo(1.5, 5);
   });
 });
 
