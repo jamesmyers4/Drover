@@ -270,4 +270,116 @@ describe("DroverDb", () => {
       db.insertRun({ ...makeRun(), status: "bogus" as any }),
     ).toThrowError(/CHECK/);
   });
+
+  it("rejects an invalid sessions.status value", () => {
+    const run = makeRun();
+    db.insertRun(run);
+    expect(() =>
+      // biome-ignore lint/suspicious/noExplicitAny: intentionally invalid status
+      db.insertSession({ ...makeSession(run.id), status: "bogus" as any }),
+    ).toThrowError(/CHECK/);
+  });
+
+  it("rejects invalid in_session_findings.type and .severity values", () => {
+    const run = makeRun();
+    db.insertRun(run);
+    const session = makeSession(run.id);
+    db.insertSession(session);
+    const eventId = db.insertActionEvent({
+      sessionId: session.id,
+      timestamp: 1000,
+      actionType: "click",
+      target: "button#save",
+      reasoning: "Trying to save the schedule.",
+    });
+    const baseFinding: InSessionFinding = {
+      id: newId(),
+      sessionId: session.id,
+      eventId,
+      type: "http-failure",
+      severity: "high",
+      description: "POST /api/schedule returned 500",
+      matchKey: "http-failure:/api/schedule:POST",
+      createdAt: Date.now(),
+    };
+
+    expect(() =>
+      db.insertInSessionFinding({
+        ...baseFinding,
+        id: newId(),
+        // biome-ignore lint/suspicious/noExplicitAny: intentionally invalid type
+        type: "not-a-real-type" as any,
+      }),
+    ).toThrowError(/CHECK/);
+    expect(() =>
+      db.insertInSessionFinding({
+        ...baseFinding,
+        id: newId(),
+        // biome-ignore lint/suspicious/noExplicitAny: intentionally invalid severity
+        severity: "catastrophic" as any,
+      }),
+    ).toThrowError(/CHECK/);
+  });
+
+  it("rejects invalid cross_session_findings.type and .severity values", () => {
+    const run = makeRun();
+    db.insertRun(run);
+    const session = makeSession(run.id);
+    db.insertSession(session);
+    const baseFinding: CrossSessionFinding = {
+      id: newId(),
+      runId: run.id,
+      type: "repeated-stumble-route",
+      severity: "medium",
+      description: "Multiple personas independently got stuck on /schedule/edit",
+      sessionIds: [session.id],
+      matchKey: "repeated-stumble-route:/schedule/edit",
+      createdAt: Date.now(),
+    };
+
+    expect(() =>
+      db.insertCrossSessionFinding({
+        ...baseFinding,
+        id: newId(),
+        // biome-ignore lint/suspicious/noExplicitAny: intentionally invalid type
+        type: "not-a-real-type" as any,
+      }),
+    ).toThrowError(/CHECK/);
+    expect(() =>
+      db.insertCrossSessionFinding({
+        ...baseFinding,
+        id: newId(),
+        // biome-ignore lint/suspicious/noExplicitAny: intentionally invalid severity
+        severity: "catastrophic" as any,
+      }),
+    ).toThrowError(/CHECK/);
+  });
+
+  it("rejects invalid finding_status_history.finding_kind and .status values", () => {
+    const run = makeRun();
+    db.insertRun(run);
+    const baseRecord = {
+      matchKey: "http-failure:/api/schedule:POST",
+      runId: run.id,
+      findingId: newId(),
+      recordedAt: 1,
+    };
+
+    expect(() =>
+      db.recordFindingStatus({
+        ...baseRecord,
+        // biome-ignore lint/suspicious/noExplicitAny: intentionally invalid finding_kind
+        findingKind: "not-a-real-kind" as any,
+        status: "new",
+      }),
+    ).toThrowError(/CHECK/);
+    expect(() =>
+      db.recordFindingStatus({
+        ...baseRecord,
+        findingKind: "in-session",
+        // biome-ignore lint/suspicious/noExplicitAny: intentionally invalid status
+        status: "bogus" as any,
+      }),
+    ).toThrowError(/CHECK/);
+  });
 });

@@ -137,6 +137,12 @@ describe("runPersonaSession", () => {
       expect(dashboardNav?.checkpointId).toBe("on-dashboard");
       const homeNav = events.find((e) => e.target === `${site.baseUrl}/`);
       expect(homeNav?.checkpointId).toBeUndefined();
+
+      // Screenshots are only captured via recordInSessionFinding (src/actor/
+      // findings.ts) at the moment a finding fires — never per-action. A
+      // clean run with zero findings is the proxy for that: no finding means
+      // no captureScreenshot call ever happened.
+      expect(db.getInSessionFindingsBySession(sessionId)).toHaveLength(0);
     },
     TIMEOUT,
   );

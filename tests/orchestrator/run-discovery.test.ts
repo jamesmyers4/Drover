@@ -1,5 +1,5 @@
 import type { Browser } from "playwright";
-import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { ScriptedModelProvider } from "../../src/actor/provider.js";
 import { launchBrowser } from "../../src/browser/index.js";
 import { DroverDb } from "../../src/db/database.js";
@@ -291,6 +291,8 @@ describe("runDiscovery", () => {
 
     const config = baseConfig({ targetBaseUrl: site.baseUrl, concurrencyCap: 4 });
 
+    const insertRunSpy = vi.spyOn(db, "insertRun");
+
     await expect(
       runDiscovery({
         db,
@@ -303,5 +305,9 @@ describe("runDiscovery", () => {
         providerFactory: () => new ScriptedModelProvider([]),
       }),
     ).rejects.toThrow(/concurrencyCap/);
+
+    // The guard must fire before any run row is written — a rejected config
+    // shouldn't leave a "running" run behind for a pack author to find later.
+    expect(insertRunSpy).not.toHaveBeenCalled();
   });
 });

@@ -15,8 +15,8 @@ line and add a dated entry under "Decisions log" for anything non-obvious
 that came up, then stop. The user reviews and commits manually between
 sessions and restarts Claude Code for the next one.
 
-**Current session: 2 — Constraint-coverage audit**
-**Next step:** Work through Session 2 below. Do not start Session 3 in the
+**Current session: 3 — Golden-master pipeline layer**
+**Next step:** Work through Session 3 below. Do not start Session 4 in the
 same run.
 
 ---
@@ -341,3 +341,98 @@ the workflow (not assumed):
   (each <1s once deps existed) and `test` (~8s, matching the local 111/17
   count). Total job time ~2.5 minutes end to end. No matrix, no separate
   browser cache step — v1 scope holds.
+
+**2026-07-24 (Session 2 — Constraint-coverage audit)** — Went through
+`CLAUDE.md`'s non-negotiable constraint list item by item. Disposition for
+each (four genuine gaps closed with new tests, the rest already covered or
+structural):
+
+- **Sequential-only / `concurrencyCap > 1` rejection, checked before
+  `db.insertRun`** — gap closed. The existing
+  `tests/orchestrator/run-discovery.test.ts` case only asserted the throw;
+  it didn't prove *when*. Added `vi.spyOn(db, "insertRun")` to that test and
+  assert it's never called — confirms `assertConcurrencyCapSupported` really
+  does fire before any run row is written, not just that the error message
+  matches.
+- **`restricted` dataPolicy refusing a non-`anthropic` provider** — already
+  covered: `tests/actor/provider.test.ts`'s `assertDataPolicyAllowed`
+  describe block (both the allow and reject paths).
+- **`fill()` value never entering the event log** — already covered, and
+  already asserts absence, not just presence:
+  `tests/browser.test.ts` › "fill logs the selector but never the value"
+  loops every logged event and asserts none contain the literal fill value.
+- **Run-level hard ceiling checked between sessions, never mid-session,
+  never dies mid-write** — already covered behaviorally
+  (`tests/orchestrator/run-discovery.test.ts` › "stops scheduling once the
+  run-level cost ceiling is hit..." — `orgSize: 5` but only 1 session runs,
+  teardown still fires). Also confirmed structurally by reading
+  `src/orchestrator/run-discovery.ts`: `config.budget.runCeilingUsd` is only
+  ever referenced in the orchestrator's own `for` loop, never passed into
+  `runPersonaSession` — so "checked mid-session" isn't just untested, it's
+  not wired up to be possible.
+- **Per-persona-session soft cap ending a session `budget-capped`** —
+  already covered: `tests/actor/loop.test.ts` › "ends budget-capped once the
+  soft cap is spent, distinct from a hard-stop".
+- **Analyst `analystCeilingUsd` pre-flight throwing before
+  `provider.analyze()` is called** — already covered, and already asserts
+  the provider was never invoked: `tests/analyst/analyze.test.ts` › "throws
+  AnalystBudgetExceededError and never calls the provider..." spies on
+  `provider.analyze` and asserts zero calls.
+- **Malformed `decide_action` cost still recorded against budget** —
+  already covered: `tests/actor/loop.test.ts` › "records the billed cost of
+  a malformed decide_action call against budget, not just successful ones".
+- **Two-phase reconciliation's `crossSessionDataComplete` flag** — already
+  covered at both the unit level (`tests/orchestrator/reconcile.test.ts`,
+  two dedicated cases) and end-to-end
+  (`tests/analyst/analyze.test.ts` › "corrects a premature 'resolved' tag
+  left by the orchestrator's pre-analyst reconciliation pass").
+- **Reasoning capture is one sentence, not multi-field chain-of-thought** —
+  genuine gap found, not closed with a test: `DECIDE_TOOL`'s `reasoning`
+  schema field (`src/actor/provider.ts`) has no length/sentence-count
+  constraint, only a non-empty check. The *multi-field* half is structurally
+  impossible (only one `reasoning` field exists in the type at all); the
+  *one-sentence* half is prompt-instruction-only and unenforced. Logged to
+  `GAPS.md` per this file's own instruction for this exact case rather than
+  writing a test that would really just be asserting scripted-provider
+  behavior against a schema, not real model adherence.
+- **Screenshots/traces only at finding-flag time, never per-action** — gap
+  closed. `src/browser/screenshot.ts`'s `captureScreenshot` is (confirmed by
+  grep) only ever called from `src/actor/findings.ts`'s
+  `recordInSessionFinding` — never from `src/browser/session.ts`'s
+  primitives. The existing loop test only proved the positive half
+  (`screenshotPath` defined when a finding fires); added one assertion to
+  the "succeeds when the success checkpoint is reached" case (zero findings
+  on a clean run) as the negative-half proxy, since a zero-finding session
+  is exactly the case where "never per-action" would be violated if it were
+  wired wrong.
+- **Secrets never entering prompt content** — documented structural
+  guarantee, no test added (this file's own suggested resolution for this
+  exact item). `src/actor/prompt.ts`'s builder signatures
+  (`StaticPromptInput` etc.) only ever accept `DomainPack`/`Goal`/
+  `PersonaArchetype`/a `routeMapContext` string — confirmed by reading the
+  file that no parameter shape exists that could carry `storageState`,
+  cookies, or API keys even by mistake. A regression test here would just
+  re-assert a type signature, not guard a real code path.
+- **CHECK-constraint-enforced enums** — gap closed for 4 of the 5 tables
+  that had one. `runs.status` and the `sessions` FK were already covered
+  (`tests/db.test.ts` › "enforces foreign keys and status check
+  constraints"), but `sessions.status`, `in_session_findings.type`/
+  `.severity`, `cross_session_findings.type`/`.severity`, and
+  `finding_status_history.finding_kind`/`.status` had no invalid-value test
+  at all — only round-trip-with-valid-values coverage. Added 4 new cases to
+  `tests/db.test.ts` asserting each rejects with `/CHECK/`.
+- **Domain-pack `teardown` runs finally-style even after a crash** —
+  already covered: all three `tests/orchestrator/run-discovery.test.ts`
+  scenarios (normal completion, budget-stopped, crashed-on-unknown-goal)
+  assert `teardownCalls` has exactly one entry.
+- **Zero write access beyond the target app's own UI** — structural, nothing
+  to test. Grepped `src/` for `fetch(`/`axios`/`http.request`/
+  `https.request`: zero hits outside the Anthropic SDK client and
+  Playwright's own browser-driven requests. No code path exists that could
+  write anywhere else.
+
+Net: 4 new test cases added across 2 files (`tests/db.test.ts` ×4 new
+`it()`s; `tests/orchestrator/run-discovery.test.ts` and
+`tests/actor/loop.test.ts` each gained one assertion inside an existing
+test, not a new `it()`), plus one new `GAPS.md` entry. Test count went from
+111 to 115. `npm run typecheck`/`build`/`lint`/`test` all still clean.
