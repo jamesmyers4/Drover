@@ -205,6 +205,52 @@ describe("runPersonaSession", () => {
   );
 
   it(
+    "records a page-error finding for an uncaught JS exception, distinct from console-error",
+    async () => {
+      await setUp();
+      const goal: Goal = {
+        id: "never-succeeds",
+        description: "Wander around.",
+        actionBudget: 2,
+        checkpoints: [{ id: "on-signup", description: "On signup.", detector: "url:/signup" }],
+        successCheckpointId: "on-signup",
+      };
+      const provider = new ScriptedModelProvider([
+        {
+          reasoning: "Visit the page that throws.",
+          actionType: "navigate",
+          url: `${site.baseUrl}/throws`,
+        },
+        { reasoning: "Give up.", actionType: "finish", outcome: "gave-up" },
+      ]);
+
+      const result = await runPersonaSession({
+        db,
+        browserSession: session,
+        browser,
+        sessionId,
+        provider,
+        archetype: makeArchetype(),
+        domainPack,
+        goal,
+        treelineAdapter: stubAdapter,
+        targetBaseUrl: site.baseUrl,
+        budget: new SessionBudget(1),
+        screenshotDir: "runs/screenshots-test",
+        disablePacing: true,
+      });
+
+      expect(result.succeeded).toBe(false);
+      const findings = db.getInSessionFindingsBySession(sessionId);
+      const pageErrorFinding = findings.find((f) => f.type === "page-error");
+      expect(pageErrorFinding).toBeDefined();
+      expect(pageErrorFinding?.severity).toBe("high");
+      expect(pageErrorFinding?.screenshotPath).toBeDefined();
+    },
+    TIMEOUT,
+  );
+
+  it(
     "ends budget-capped once the soft cap is spent, distinct from a hard-stop",
     async () => {
       await setUp();

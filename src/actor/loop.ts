@@ -54,11 +54,15 @@ interface BrowserSessionLike {
   fill(selector: string, value: string, reasoning: string): Promise<string>;
 }
 
-/** Returns the id of the event the primitive logged, or undefined for "finish" (no primitive). */
+/**
+ * Only ever called with a primitive decision — `runPersonaSession` handles
+ * "finish" itself (`break outer`) before this is reached, so the decision
+ * type here is narrowed to exclude it rather than carrying a dead branch.
+ */
 async function executeAction(
   session: BrowserSessionLike,
-  decision: ActorDecision,
-): Promise<string | undefined> {
+  decision: ActorDecision & { actionType: "navigate" | "click" | "fill" },
+): Promise<string> {
   switch (decision.actionType) {
     case "navigate":
       return await session.navigate(decision.url as string, decision.reasoning);
@@ -70,8 +74,6 @@ async function executeAction(
         decision.value as string,
         decision.reasoning,
       );
-    case "finish":
-      return undefined;
   }
 }
 
@@ -97,6 +99,22 @@ async function detectAndRecordFindings(opts: {
         eventId: event.id,
         type: "console-error",
         severity: "low",
+        description: event.reasoning,
+        target: event.target,
+        page: opts.page,
+        screenshotDir: opts.screenshotDir,
+        recentEvents: events,
+      });
+    } else if (event.actionType === "page-error") {
+      // An uncaught JS exception is a stronger signal than an arbitrary
+      // console.error() call — treated as "high", matching a 5xx http-failure,
+      // not lumped in with console-error's "low" (see GAPS.md).
+      await recordInSessionFinding({
+        db: opts.db,
+        sessionId: opts.sessionId,
+        eventId: event.id,
+        type: "page-error",
+        severity: "high",
         description: event.reasoning,
         target: event.target,
         page: opts.page,
@@ -214,22 +232,26 @@ export async function runPersonaSession(
           break outer;
         }
 
-        const eventId = await executeAction(browserSession, decision);
+        // Narrowed by the "finish" check above; TS can't carry that narrowing
+        // through the whole `decision` object (only through direct property
+        // reads), so this cast reflects a runtime guarantee, not a guess.
+        const eventId = await executeAction(
+          browserSession,
+          decision as ActorDecision & { actionType: "navigate" | "click" | "fill" },
+        );
         stepSucceeded = true;
 
-        if (eventId !== undefined) {
-          // Tag the action that just landed with whichever checkpoint it newly
-          // satisfied, if any — checkpoint state is only knowable after the
-          // action's effect is on the page, so this necessarily happens after
-          // the event was already written. If one action satisfies more than
-          // one checkpoint at once, only the first (goal order) gets the tag;
-          // all of them still count toward `reached`.
-          const nowReached = await evaluateCheckpoints(goal.checkpoints, page);
-          const newlyReached = nowReached.filter((id) => !reached.has(id));
-          if (newlyReached.length > 0) {
-            db.updateActionEventCheckpoint(eventId, newlyReached[0] as string);
-            for (const id of newlyReached) reached.add(id);
-          }
+        // Tag the action that just landed with whichever checkpoint it newly
+        // satisfied, if any — checkpoint state is only knowable after the
+        // action's effect is on the page, so this necessarily happens after
+        // the event was already written. If one action satisfies more than
+        // one checkpoint at once, only the first (goal order) gets the tag;
+        // all of them still count toward `reached`.
+        const nowReached = await evaluateCheckpoints(goal.checkpoints, page);
+        const newlyReached = nowReached.filter((id) => !reached.has(id));
+        if (newlyReached.length > 0) {
+          db.updateActionEventCheckpoint(eventId, newlyReached[0] as string);
+          for (const id of newlyReached) reached.add(id);
         }
         break;
       } catch (err) {

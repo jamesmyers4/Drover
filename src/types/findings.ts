@@ -14,6 +14,7 @@ export type FindingSeverity = "low" | "medium" | "high" | "critical";
 export type InSessionFindingType =
   | "console-error"
   | "http-failure"
+  | "page-error"
   | "action-budget-exhausted"
   | "hard-stop";
 

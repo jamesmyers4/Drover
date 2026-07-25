@@ -136,6 +136,26 @@ describe("BrowserSession", () => {
   );
 
   it(
+    "an uncaught page exception lands in the event stream as page-error",
+    async () => {
+      const session = await BrowserSession.open(browser, { sessionId, db, deviceType: "desktop" });
+      try {
+        await session.navigate(`${site.baseUrl}/throws`, "Visit the page that throws.");
+        // The pageerror listener fires async off the script tag; give it a beat.
+        await session.page.waitForTimeout(100);
+      } finally {
+        await session.close();
+      }
+      const events = db.getEventsBySession(sessionId);
+      const pageErrors = events.filter((e) => e.actionType === "page-error");
+      expect(pageErrors.length).toBeGreaterThanOrEqual(1);
+      expect(pageErrors[0]?.target).toContain("/throws");
+      expect(pageErrors[0]?.reasoning).toContain("Uncaught page exception observed");
+    },
+    INTEGRATION_TIMEOUT,
+  );
+
+  it(
     "fill logs the selector but never the value",
     async () => {
       const session = await BrowserSession.open(browser, { sessionId, db, deviceType: "desktop" });

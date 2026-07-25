@@ -574,15 +574,15 @@ Full detail in `TESTING.md`'s decisions log.
 
 ### Session 9 — Browser session
 
-- Add one fixture page to `tests/fixtures/site.ts` that throws an uncaught
-  JS exception (e.g. `<script>null.foo()</script>` or similar — anything
-  that fires Playwright's `pageerror` event rather than going through
-  `console.error`), and add a new case to `tests/browser.test.ts` proving
-  a `page-error` event lands in the event stream with the exception
-  message. (This is a good moment to also double-check the `GAPS.md` entry
-  about `page-error` never producing a finding — the new test just needs
-  to prove the *event* is captured, not that a finding fires, since that's
-  a separate, already-logged question.)
+- ~~Add one fixture page to `tests/fixtures/site.ts` that throws an
+  uncaught JS exception... and add a new case to `tests/browser.test.ts`
+  proving a `page-error` event lands in the event stream~~ — **done**
+  2026-07-25, alongside actually fixing the `GAPS.md` entry this pointed
+  at: `/throws` in `tests/fixtures/site.ts`, a case in
+  `tests/browser.test.ts` for the raw event, and (since `page-error` is
+  now a real finding type, not just an event) a case in
+  `tests/actor/loop.test.ts` proving the finding fires with `severity:
+  "high"`, distinct from `console-error`.
 - One case forcing `captureScreenshot` to fail (e.g. an invalid/
   unwritable `dir`, or stub `page.screenshot` to reject if that's easier)
   and asserting it resolves to `undefined` rather than throwing.

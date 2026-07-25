@@ -168,6 +168,17 @@ every time instead of skip-gracefully-without-a-key. 173 tests passing
 - **`runStampede` accepts either `sourceRunId` or an explicit `routes`/`targetBaseUrl` pair, exactly one of the two** (`InvalidStampedeOptionsError` otherwise). The CLI only ever uses `sourceRunId` — the explicit-routes path exists purely as a programmatic escape hatch for tests/smoke, so they don't need to spin up a full discovery run just to get a route list to replay against.
 - **`drover stampede` is console-output-only in v1** — no `--out`/markdown integration with `drover report` yet (see `GAPS.md`). Results are still fully queryable from `stampede_route_results` via `DroverDb.getStampedeRouteResultsByRun`, consistent with CONTEXT.md's "structured JSON/SQLite underneath as the source of truth" — the report integration is additive follow-up work, not a rebuild.
 
+## 2026-07-25 (GAPS.md fixes) — two code-shape observations from the test coverage sweep, resolved
+
+Not a numbered plan session — picked up from `GAPS.md`'s "test coverage
+sweep" entry (two small behavioral/shape questions logged but
+deliberately not fixed at the time, since that pass was scoped to test
+coverage only). Both decided and fixed this session; full write-up in
+`GAPS.md`'s now-resolved entry.
+
+- **`executeAction`'s `"finish"` case (`src/actor/loop.ts`) was genuinely dead code, not load-bearing.** Confirmed no caller path reaches it (`runPersonaSession` already handles `"finish"` and `break outer`s first) — deleted, and `executeAction`'s parameter type narrowed to `ActorDecision & { actionType: "navigate" | "click" | "fill" }` so the switch is exhaustive over real primitives rather than carrying a `case` nothing can hit. One cast needed at the call site (TS doesn't carry `decision.actionType === "finish"` narrowing through to the whole `decision` object).
+- **`page-error` events (uncaught JS exceptions) never became an in-session finding — decided this was an omission, not intentional, and fixed it.** `page-error` is now a full `InSessionFindingType` (`src/types/findings.ts`), severity `high` (a stronger signal than `console-error`'s `low` — an uncaught exception doesn't always come with a matching console.error call, confirmed via a new fixture page, `/throws` in `tests/fixtures/site.ts`, that throws with none). Wired into `detectAndRecordFindings` (`src/actor/loop.ts`). Required **migration 5** (`src/db/migrations.ts`) to extend `in_session_findings`'s `type` CHECK constraint to include it — this is the first migration that couldn't just `ALTER TABLE ADD COLUMN` (migrations 2/3's approach): SQLite has no `ALTER ... DROP/ADD CONSTRAINT`, so it rebuilds the table (create new with the wider CHECK, copy every row, drop the old table, rename the new one into place, recreate its two indexes). New test coverage: a raw-event case in `tests/browser.test.ts`, and a finding-level case in `tests/actor/loop.test.ts` asserting `severity: "high"` and that it's distinct from `console-error`.
+
 ---
 
 ## Repo locations (from the user, post-Session-1)

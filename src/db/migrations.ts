@@ -136,4 +136,34 @@ export const migrations: Migration[] = [
       CREATE INDEX idx_stampede_route_results_run ON stampede_route_results(stampede_run_id);
     `,
   },
+  {
+    version: 5,
+    name: "in-session-findings-page-error",
+    sql: `
+      CREATE TABLE in_session_findings_new (
+        id TEXT PRIMARY KEY,
+        session_id TEXT NOT NULL REFERENCES sessions(id),
+        event_id TEXT NOT NULL REFERENCES action_events(id),
+        type TEXT NOT NULL CHECK (type IN ('console-error', 'http-failure', 'page-error', 'action-budget-exhausted', 'hard-stop')),
+        severity TEXT NOT NULL CHECK (severity IN ('low', 'medium', 'high', 'critical')),
+        description TEXT NOT NULL,
+        match_key TEXT NOT NULL,
+        screenshot_path TEXT,
+        trace_snippet TEXT,
+        created_at INTEGER NOT NULL
+      );
+      INSERT INTO in_session_findings_new (
+        id, session_id, event_id, type, severity, description, match_key,
+        screenshot_path, trace_snippet, created_at
+      )
+      SELECT
+        id, session_id, event_id, type, severity, description, match_key,
+        screenshot_path, trace_snippet, created_at
+      FROM in_session_findings;
+      DROP TABLE in_session_findings;
+      ALTER TABLE in_session_findings_new RENAME TO in_session_findings;
+      CREATE INDEX idx_in_session_findings_session ON in_session_findings(session_id);
+      CREATE INDEX idx_in_session_findings_match ON in_session_findings(match_key);
+    `,
+  },
 ];

@@ -1,8 +1,9 @@
 /**
  * Tiny local fixture site for tests and the smoke script — no network
  * dependency, deterministic content. Serves a few pages that exercise the
- * harness: navigation links, a form, a console error, an HTTP 500, and a
- * login page (password field) for auth-wall detection.
+ * harness: navigation links, a form, a console error, an uncaught page
+ * exception, an HTTP 500, and a login page (password field) for auth-wall
+ * detection.
  */
 
 import { createServer, type Server } from "node:http";
@@ -75,6 +76,14 @@ const pages: Record<string, { status: number; contentType: string; body: string 
     status: 500,
     contentType: "application/json",
     body: '{"error":"fixture internal error"}',
+  },
+  "/throws": {
+    status: 200,
+    contentType: "text/html",
+    body: `<!doctype html><html><head><title>Throws</title></head><body>
+      <h1>Uncaught exception page</h1>
+      <script>null.foo();</script>
+    </body></html>`,
   },
 };
 
