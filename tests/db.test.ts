@@ -7,6 +7,7 @@ import type {
   PersonaSession,
   Run,
   SimConfig,
+  StampedeRun,
 } from "../src/types/index.js";
 
 const sampleConfig: SimConfig = {
@@ -468,5 +469,95 @@ describe("DroverDb", () => {
         status: "bogus" as any,
       }),
     ).toThrowError(/CHECK/);
+  });
+
+  it("round-trips a stampede run, with and without a source run id", () => {
+    const sourceRun = makeRun();
+    db.insertRun(sourceRun);
+
+    const withSource: StampedeRun = {
+      id: newId(),
+      sourceRunId: sourceRun.id,
+      targetBaseUrl: "https://staging.example.test",
+      concurrencyLevels: [1, 5, 10],
+      startedAt: 1000,
+    };
+    db.insertStampedeRun(withSource);
+    expect(db.getStampedeRun(withSource.id)).toEqual(withSource);
+
+    const withoutSource: StampedeRun = {
+      id: newId(),
+      targetBaseUrl: "https://staging.example.test",
+      concurrencyLevels: [1],
+      startedAt: 2000,
+    };
+    db.insertStampedeRun(withoutSource);
+    const fetched = db.getStampedeRun(withoutSource.id);
+    expect(fetched).toEqual(withoutSource);
+    expect(fetched).not.toHaveProperty("sourceRunId");
+  });
+
+  it("updateStampedeRunEnded sets ended_at", () => {
+    const run: StampedeRun = {
+      id: newId(),
+      targetBaseUrl: "https://staging.example.test",
+      concurrencyLevels: [1],
+      startedAt: 1000,
+    };
+    db.insertStampedeRun(run);
+    expect(db.getStampedeRun(run.id)?.endedAt).toBeUndefined();
+    db.updateStampedeRunEnded(run.id, 5000);
+    expect(db.getStampedeRun(run.id)?.endedAt).toBe(5000);
+  });
+
+  it("round-trips stampede route results, ordered by route then concurrency", () => {
+    const run: StampedeRun = {
+      id: newId(),
+      targetBaseUrl: "https://staging.example.test",
+      concurrencyLevels: [1, 5],
+      startedAt: 1000,
+    };
+    db.insertStampedeRun(run);
+
+    db.insertStampedeRouteResult({
+      id: newId(),
+      stampedeRunId: run.id,
+      route: "/horses",
+      concurrency: 1,
+      sampleCount: 3,
+      errorCount: 0,
+      p50Ms: 10,
+      p95Ms: 15,
+      p99Ms: 20,
+      recordedAt: 1500,
+    });
+    db.insertStampedeRouteResult({
+      id: newId(),
+      stampedeRunId: run.id,
+      route: "/",
+      concurrency: 5,
+      sampleCount: 15,
+      errorCount: 1,
+      p50Ms: 20,
+      p95Ms: 40,
+      p99Ms: 60,
+      recordedAt: 1600,
+    });
+    db.insertStampedeRouteResult({
+      id: newId(),
+      stampedeRunId: run.id,
+      route: "/",
+      concurrency: 1,
+      sampleCount: 3,
+      errorCount: 0,
+      p50Ms: 5,
+      p95Ms: 8,
+      p99Ms: 9,
+      recordedAt: 1400,
+    });
+
+    const results = db.getStampedeRouteResultsByRun(run.id);
+    expect(results.map((r) => `${r.route}@${r.concurrency}`)).toEqual(["/@1", "/@5", "/horses@1"]);
+    expect(db.getStampedeRouteResultsByRun("no-such-run")).toEqual([]);
   });
 });

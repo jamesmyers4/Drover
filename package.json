@@ -20,6 +20,7 @@
     "smoke:actor": "tsx scripts/smoke-actor.ts",
     "smoke:orchestrator": "tsx scripts/smoke-orchestrator.ts",
     "smoke:analyst": "tsx scripts/smoke-analyst.ts",
+    "smoke:stampede": "tsx scripts/smoke-stampede.ts",
     "drover": "tsx src/cli/index.ts"
   },
   "keywords": [

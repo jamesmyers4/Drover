@@ -29,3 +29,4 @@ export type {
   RunStatus,
   SessionStatus,
 } from "./run.js";
+export type { StampedeRouteResult, StampedeRun } from "./stampede.js";

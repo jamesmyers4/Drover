@@ -16,6 +16,11 @@ import { DroverDb } from "../db/database.js";
 import { loadDefaultExport } from "../orchestrator/config-loader.js";
 import { runDiscovery } from "../orchestrator/run-discovery.js";
 import { buildRunReport, renderMarkdownReport } from "../report/index.js";
+import {
+  DEFAULT_CONCURRENCY_LEVELS,
+  DEFAULT_ITERATIONS_PER_WORKER,
+  runStampede,
+} from "../stampede/index.js";
 import type { DomainPack, SimConfig } from "../types/index.js";
 
 async function registerTsLoader(): Promise<void> {
@@ -120,6 +125,53 @@ async function reportCommand(runId: string, options: { db: string; out?: string 
   }
 }
 
+function parseConcurrencyLevels(raw: string): number[] {
+  const levels = raw.split(",").map((s) => Number(s.trim()));
+  for (const level of levels) {
+    if (!Number.isInteger(level) || level < 1) {
+      throw new Error(
+        `--concurrency must be a comma-separated list of positive integers, got "${raw}".`,
+      );
+    }
+  }
+  return levels;
+}
+
+async function stampedeCommand(
+  sourceRunId: string,
+  options: { db: string; concurrency: string; iterationsPerWorker: string },
+): Promise<void> {
+  const db = new DroverDb(options.db);
+  try {
+    const concurrencyLevels = parseConcurrencyLevels(options.concurrency);
+    const iterationsPerWorker = Number(options.iterationsPerWorker);
+
+    console.log(`Stampede-replaying routes discovered by run ${sourceRunId}`);
+    console.log(`  concurrency levels: ${concurrencyLevels.join(", ")}`);
+    console.log(`  iterations/worker:  ${iterationsPerWorker}\n`);
+
+    const result = await runStampede({
+      db,
+      sourceRunId,
+      concurrencyLevels,
+      iterationsPerWorker,
+    });
+
+    console.log(`Stampede run ${result.stampedeRunId} against ${result.targetBaseUrl}`);
+    console.log(`  routes: ${result.routes.join(", ")}\n`);
+    console.log(
+      `  ${"route".padEnd(30)}${"conc".padEnd(6)}${"samples".padEnd(9)}${"errors".padEnd(8)}${"p50".padEnd(8)}${"p95".padEnd(8)}p99`,
+    );
+    for (const r of result.results) {
+      console.log(
+        `  ${r.route.padEnd(30)}${String(r.concurrency).padEnd(6)}${String(r.sampleCount).padEnd(9)}${String(r.errorCount).padEnd(8)}${`${r.p50Ms}ms`.padEnd(8)}${`${r.p95Ms}ms`.padEnd(8)}${r.p99Ms}ms`,
+      );
+    }
+  } finally {
+    db.close();
+  }
+}
+
 const program = new Command();
 program
   .name("drover")
@@ -187,5 +239,39 @@ program
       process.exitCode = 1;
     }
   });
+
+program
+  .command("stampede")
+  .description(
+    "Replay a completed discovery run's discovered routes as scripted (non-LLM) load-test traffic.",
+  )
+  .argument("<run-id>", "id of a previously completed discovery run to pull routes/target from")
+  .requiredOption(
+    "-d, --db <path>",
+    "path to the run's SQLite file (the --out path from `drover run`)",
+  )
+  .option(
+    "--concurrency <levels>",
+    "comma-separated concurrency levels to test, in order",
+    DEFAULT_CONCURRENCY_LEVELS.join(","),
+  )
+  .option(
+    "--iterations-per-worker <n>",
+    "full route-list passes each concurrent worker makes per level",
+    String(DEFAULT_ITERATIONS_PER_WORKER),
+  )
+  .action(
+    async (
+      runId: string,
+      options: { db: string; concurrency: string; iterationsPerWorker: string },
+    ) => {
+      try {
+        await stampedeCommand(runId, options);
+      } catch (err) {
+        console.error(err instanceof Error ? err.message : err);
+        process.exitCode = 1;
+      }
+    },
+  );
 
 program.parseAsync(process.argv);

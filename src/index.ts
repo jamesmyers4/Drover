@@ -6,6 +6,7 @@ export { type Migration, migrations } from "./db/migrations.js";
 export { computeMatchKey, normalizeRoute } from "./matching/match-key.js";
 export * from "./orchestrator/index.js";
 export * from "./report/index.js";
+export * from "./stampede/index.js";
 export {
   createTreelineAdapter,
   type ResolvedSeedUrl,

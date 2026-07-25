@@ -14,6 +14,8 @@ import type {
   PersonaSession,
   Run,
   SimConfig,
+  StampedeRouteResult,
+  StampedeRun,
 } from "../types/index.js";
 import { migrations } from "./migrations.js";
 
@@ -499,5 +501,99 @@ export class DroverDb {
       status: row.status,
       recordedAt: row.recorded_at,
     };
+  }
+
+  // --- stampede ---
+
+  insertStampedeRun(run: StampedeRun): void {
+    this.db
+      .prepare(
+        "INSERT INTO stampede_runs (id, source_run_id, target_base_url, concurrency_levels_json, started_at, ended_at) VALUES (?, ?, ?, ?, ?, ?)",
+      )
+      .run(
+        run.id,
+        run.sourceRunId ?? null,
+        run.targetBaseUrl,
+        JSON.stringify(run.concurrencyLevels),
+        run.startedAt,
+        run.endedAt ?? null,
+      );
+  }
+
+  updateStampedeRunEnded(id: string, endedAt: number): void {
+    this.db.prepare("UPDATE stampede_runs SET ended_at = ? WHERE id = ?").run(endedAt, id);
+  }
+
+  getStampedeRun(id: string): StampedeRun | undefined {
+    const row = this.db.prepare("SELECT * FROM stampede_runs WHERE id = ?").get(id) as
+      | {
+          id: string;
+          source_run_id: string | null;
+          target_base_url: string;
+          concurrency_levels_json: string;
+          started_at: number;
+          ended_at: number | null;
+        }
+      | undefined;
+    if (!row) return undefined;
+    return {
+      id: row.id,
+      ...(row.source_run_id !== null && { sourceRunId: row.source_run_id }),
+      targetBaseUrl: row.target_base_url,
+      concurrencyLevels: JSON.parse(row.concurrency_levels_json) as number[],
+      startedAt: row.started_at,
+      ...(row.ended_at !== null && { endedAt: row.ended_at }),
+    };
+  }
+
+  insertStampedeRouteResult(result: StampedeRouteResult): void {
+    this.db
+      .prepare(
+        "INSERT INTO stampede_route_results (id, stampede_run_id, route, concurrency, sample_count, error_count, p50_ms, p95_ms, p99_ms, recorded_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      )
+      .run(
+        result.id,
+        result.stampedeRunId,
+        result.route,
+        result.concurrency,
+        result.sampleCount,
+        result.errorCount,
+        result.p50Ms,
+        result.p95Ms,
+        result.p99Ms,
+        result.recordedAt,
+      );
+  }
+
+  /** Ordered by route then concurrency, so a route's results read low-to-high as concurrency climbs. */
+  getStampedeRouteResultsByRun(stampedeRunId: string): StampedeRouteResult[] {
+    const rows = this.db
+      .prepare(
+        "SELECT * FROM stampede_route_results WHERE stampede_run_id = ? ORDER BY route, concurrency",
+      )
+      .all(stampedeRunId) as {
+      id: string;
+      stampede_run_id: string;
+      route: string;
+      concurrency: number;
+      sample_count: number;
+      error_count: number;
+      p50_ms: number;
+      p95_ms: number;
+      p99_ms: number;
+      recorded_at: number;
+    }[];
+    return rows.map((row) => ({
+      id: row.id,
+      stampedeRunId: row.stampede_run_id,
+      route: row.route,
+      concurrency: row.concurrency,
+      sampleCount: row.sample_count,
+      errorCount: row.error_count,
+      p50Ms: row.p50_ms,
+      p95Ms: row.p95_ms,
+      p99Ms: row.p99_ms,
+      recordedAt: row.recorded_at,
+    }));
   }
 }

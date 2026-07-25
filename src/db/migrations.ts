@@ -108,4 +108,32 @@ export const migrations: Migration[] = [
       ALTER TABLE runs ADD COLUMN analyst_cost_usd REAL;
     `,
   },
+  {
+    version: 4,
+    name: "stampede-tables",
+    sql: `
+      CREATE TABLE stampede_runs (
+        id TEXT PRIMARY KEY,
+        source_run_id TEXT REFERENCES runs(id),
+        target_base_url TEXT NOT NULL,
+        concurrency_levels_json TEXT NOT NULL,
+        started_at INTEGER NOT NULL,
+        ended_at INTEGER
+      );
+
+      CREATE TABLE stampede_route_results (
+        id TEXT PRIMARY KEY,
+        stampede_run_id TEXT NOT NULL REFERENCES stampede_runs(id),
+        route TEXT NOT NULL,
+        concurrency INTEGER NOT NULL,
+        sample_count INTEGER NOT NULL,
+        error_count INTEGER NOT NULL,
+        p50_ms REAL NOT NULL,
+        p95_ms REAL NOT NULL,
+        p99_ms REAL NOT NULL,
+        recorded_at INTEGER NOT NULL
+      );
+      CREATE INDEX idx_stampede_route_results_run ON stampede_route_results(stampede_run_id);
+    `,
+  },
 ];

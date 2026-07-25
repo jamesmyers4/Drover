@@ -6,7 +6,7 @@ Drover is an open-source, config-driven simulation harness that runs AI-driven p
 
 Two AI tiers currently exist: an **actor** tier that drives a real browser one persona-session at a time (perceive → decide → act, LLM-reasoned), and an **analyst** tier that mines patterns across a completed run's sessions after the fact. A **fixer** tier (auto-proposing code fixes) is explicitly Phase 2 and not part of this codebase yet. See `CONTEXT.md` for the full product spec and `CLAUDE.md` for the as-built architecture map — this README is the practical entry point.
 
-**Status:** Sessions 1–6 of the build are done (types/DB, browser harness, actor tier, discovery orchestrator, analyst tier, markdown reporting). Not yet built: Stampede (scripted load-replay) mode, example domain packs, and the real Horse Haven Ops pack. See `SESSION-LOG.md` for the full dated history and `GAPS.md` for known blind spots.
+**Status:** Sessions 1–7 of the build are done (types/DB, browser harness, actor tier, discovery orchestrator, analyst tier, markdown reporting, Stampede load mode). Not yet built: example domain packs and the real Horse Haven Ops pack. See `SESSION-LOG.md` for the full dated history and `GAPS.md` for known blind spots.
 
 ## What it does today
 
@@ -23,7 +23,11 @@ Two AI tiers currently exist: an **actor** tier that drives a real browser one p
 
 **Reporting** — `drover report <run-id> --db <path> [--out report.md]` reads a run's SQLite data (no re-simulation, no re-analysis) and builds a markdown report: a findings summary table (severity, type, session count, status), the same findings broken out by flow (`Goal.id`), run metadata (config dimensions, actual actor/analyst spend vs. budget), and a "since last run" new/still-open/resolved count. Findings from both tables merge into one row per `matchKey`; each row links to its evidence (screenshot paths, event ids) in a separate appendix rather than inlining it. Prints to stdout without `--out`. Surfaces a warning when `drover analyze` hasn't run yet for the run, since cross-session findings/status may be incomplete until it has.
 
-Not built yet: Stampede mode (scripted, non-reasoning load replay of discovered routes).
+**Stampede mode** — a distinct `drover stampede <run-id> --db <path>` command: scripted, non-reasoning replay of routes a *discovery* run already found, at increasing concurrency. No LLM calls anywhere — the only real safety property to know is that the target is always the source run's own `targetBaseUrl`, never an arbitrary URL you pass in. It pulls the distinct `navigate` targets a discovery run recorded, then for each `--concurrency` level (default `1,5,10`, run one at a time so the comparison is clean) spins up that many independent browser contexts, each making `--iterations-per-worker` (default 3) timed passes through every route. Results — sample count, error count, and p50/p95/p99 response times per (route, concurrency) pair — go to their own `stampede_runs`/`stampede_route_results` tables (not the discovery `runs`/`sessions`/`action_events` tables, which have no natural home for load-test traffic) and print to the console. Needs no credentials at all — `npm run smoke:stampede` runs it for real, unlike every other smoke script.
+
+## What it doesn't do yet
+
+Stampede results aren't folded into `drover report` (console output only, for now), and only a page's own `navigate` targets get replayed — not full click/fill goal sequences, since that would mutate app data at load-test volume with no teardown to clean it up. See `GAPS.md`.
 
 ## Quickstart
 
@@ -46,9 +50,10 @@ export ANTHROPIC_API_KEY=sk-...
 npm run drover -- run ./my-domain-pack.ts --config ./sim.config.ts --out ./runs/run1.sqlite
 npm run drover -- analyze <run-id> --db ./runs/run1.sqlite
 npm run drover -- report <run-id> --db ./runs/run1.sqlite --out ./runs/report1.md
+npm run drover -- stampede <run-id> --db ./runs/run1.sqlite --concurrency 1,5,10
 ```
 
-`npm run smoke:actor`, `smoke:orchestrator`, and `smoke:analyst` exercise the actor loop, the full orchestrator (as a real CLI subprocess), and the analyst's Batch API lifecycle respectively — the first and third need `ANTHROPIC_API_KEY` and print a clear skip message and exit 0 without it; `smoke:orchestrator` runs regardless (every session just hard-stops on the missing key, which itself exercises per-session isolation).
+`npm run smoke:actor`, `smoke:orchestrator`, and `smoke:analyst` exercise the actor loop, the full orchestrator (as a real CLI subprocess), and the analyst's Batch API lifecycle respectively — the first and third need `ANTHROPIC_API_KEY` and print a clear skip message and exit 0 without it; `smoke:orchestrator` runs regardless (every session just hard-stops on the missing key, which itself exercises per-session isolation). `npm run smoke:stampede` needs no credentials at all — Stampede has no LLM calls in it.
 
 ## Writing a domain pack
 
@@ -180,11 +185,13 @@ Reconciliation is **two-phase**: `drover run` reconciles right after a run finis
 drover run <domain-pack> [--config sim.config.ts] [--out path]
 drover analyze <run-id> --db <path> [--poll-interval-ms <ms>] [--sessions-per-chunk <n>]
 drover report <run-id> --db <path> [--out report.md]
+drover stampede <run-id> --db <path> [--concurrency 1,5,10] [--iterations-per-worker 3]
 ```
 
 - `<domain-pack>` and `--config` are paths to local TypeScript modules with a default export (a `DomainPack` and `SimConfig` respectively). `--out` defaults to `runs/<timestamp>.sqlite`.
 - `drover analyze` requires `--db <path>` (no default — a run id alone doesn't say which SQLite file it lives in) and does *not* take a `--config` flag; it reads the analyst model route from the run's own stored config snapshot. `--sessions-per-chunk` defaults to 25 — see [Cross-session analysis](#what-it-does-today) above.
 - `drover report` also requires `--db <path>`, same reasoning as `analyze`. Without `--out`, the markdown report prints to stdout; with it, the report is written to that file path instead.
+- `drover stampede` also requires `--db <path>`; `<run-id>` is a *discovery* run's id (`drover run`'s output), whose recorded routes and `targetBaseUrl` get replayed. `--concurrency` is a comma-separated list of positive integers tested in order; `--iterations-per-worker` is how many full route-list passes each concurrent worker makes per level.
 
 ## Repo layout
 
@@ -198,9 +205,9 @@ src/
   matching/      Cross-run finding match-key computation
   orchestrator/  Discovery-mode scheduling, weighted goal draw, reconciliation, run-discovery entry point
   analyst/       Post-hoc cross-session pattern mining via the Batch API
-  cli/           `drover run` / `drover analyze` / `drover report` commands
+  cli/           `drover run` / `drover analyze` / `drover report` / `drover stampede` commands
   report/        Markdown findings report generation from a run's SQLite data
-  stampede/      Not yet built
+  stampede/      Scripted (non-LLM) load-test replay of a discovery run's discovered routes
 ```
 
 `tests/fixtures/site.ts` is a self-contained local fixture site (nav, form, login, dashboard, console-error page, 500 endpoint) used by both tests and the smoke scripts, so nothing depends on network access or Horse Haven staging being reachable. Set `SMOKE_URL=<url>` to point smoke scripts at a real target instead.

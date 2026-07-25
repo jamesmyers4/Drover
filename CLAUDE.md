@@ -8,11 +8,11 @@ Also read `SESSION-LOG.md` (dated build history, session by session, with the fu
 
 ## Build status
 
-Sessions 1–6 of the original build plan are done: core types + SQLite layer, browser harness + treeLine adapter, the actor tier (LLM persona loop), the discovery-mode orchestrator, the analyst tier (cross-session pattern mining), and markdown reporting. See `SESSION-LOG.md` for the full dated history and decisions log, session by session.
+Sessions 1–7 of the original build plan are done: core types + SQLite layer, browser harness + treeLine adapter, the actor tier (LLM persona loop), the discovery-mode orchestrator, the analyst tier (cross-session pattern mining), markdown reporting, and Stampede mode (scripted load replay). See `SESSION-LOG.md` for the full dated history and decisions log, session by session.
 
-**Next step:** Session 7 — Stampede mode (`src/stampede/`): takes the routes/checkpoints discovery mode already found and replays them as scripted (non-LLM, no reasoning) Playwright sessions at volume, per CONTEXT.md's "Execution modes." Captures response time percentiles (p50/p95/p99) per route and error rate under load. New CLI command. Do not start Session 8.
+**Next step:** Session 8 — example domain packs + README quickstart (`examples/`): a small core archetype set (impatient/rushed, first-timer/cautious, distracted, power-user-on-mobile per CONTEXT.md's persona layer) plus a toy domain pack, so someone adopting Drover has a real end-to-end example rather than having to write a `DomainPack`/`SimConfig` from scratch. Do not start Session 9.
 
-**Not yet built:** Stampede mode (`src/stampede/`, scripted load replay), the example domain packs and README quickstart (`examples/`), the real Horse Haven Ops domain pack, and a validation run against Horse Haven staging. These map to the original plan's Session 7–9 scope. Treat CONTEXT.md's relevant sections ("Stampede mode," "Open source packaging") as the spec for that work when it's picked up.
+**Not yet built:** the example domain packs and README quickstart (`examples/`), the real Horse Haven Ops domain pack, and a validation run against Horse Haven staging. These map to the original plan's Session 8–9 scope. Treat CONTEXT.md's relevant sections ("Open source packaging") as the spec for that work when it's picked up.
 
 No `ANTHROPIC_API_KEY` has been available in any build environment so far — every real-model code path (actor tier, analyst tier's Batch API) is implemented and covered by scripted/mocked tests, but has never been exercised against a live model. The smoke scripts (`npm run smoke:actor`, `smoke:orchestrator`, `smoke:analyst`) detect the missing key and skip gracefully rather than failing. Run them with a real key before trusting real-model behavior. Horse Haven staging URL/credentials are also still pending — smoke has only ever run against the local fixture site (`SMOKE_URL=<url>` points it at a real target when available); creds become truly blocking once the real Horse Haven Ops domain pack work starts.
 
@@ -35,7 +35,7 @@ No `ANTHROPIC_API_KEY` has been available in any build environment so far — ev
 
 ## Architecture & module map
 
-Three tiers per CONTEXT.md — **actor** (drives the browser, one persona/goal at a time), **analyst** (post-hoc cross-session pattern mining), **fixer** (Phase 2, not built). Two execution modes — **discovery** (LLM-reasoning personas, built) and **Stampede** (scripted load replay, not built).
+Three tiers per CONTEXT.md — **actor** (drives the browser, one persona/goal at a time), **analyst** (post-hoc cross-session pattern mining), **fixer** (Phase 2, not built). Two execution modes — **discovery** (LLM-reasoning personas, built) and **Stampede** (scripted load replay, built — see below).
 
 ```
 src/
@@ -81,7 +81,12 @@ src/
                    summary table, breakdown by flow, run metadata/cost actuals,
                    since-last-run counts, evidence appendix). Reads only the
                    SQLite file — no re-simulation, no re-analysis.
-  stampede/        NOT YET BUILT.
+  stampede/        routes.ts = extractDiscoveredRoutes (pulls distinct normalized routes from
+                   a discovery run's recorded `navigate` events). metrics.ts = percentile
+                   math + summarizeSamples (per route x concurrency-level aggregation).
+                   replay.ts = the scripted navigation-timing engine (no BrowserSession, no
+                   action_events writes — see decisions log). run-stampede.ts = runStampede,
+                   the entry point (own stampede_runs/stampede_route_results tables).
   archetypes/       NOT YET BUILT (ships in examples/ per plan — see CONTEXT.md persona layer).
 ```
 
@@ -149,6 +154,16 @@ These are decisions CONTEXT.md left open that got resolved during the build. Ful
 - Findings link to evidence (screenshot paths, event ids) in a separate "Evidence" appendix section rather than inlining screenshots/trace text into the summary tables (CONTEXT.md "Visual evidence": keep captured evidence exactly where you'd look for it, not duplicated into every row).
 - `drover report` takes the same `--db <path>`-required, no-`--config` pattern `drover analyze` already established, for the same reason (a run id alone doesn't say which SQLite file it lives in; the report needs nothing from a live domain pack or sim config file). No `--out` prints the markdown to stdout instead of writing a file.
 
+**Stampede tier**
+- Stampede has **no LLM calls anywhere** — no `dataPolicy`/provider concerns, no per-token cost, no `ModelRoute`. The only real safety concern is not hammering a dev-tier staging server; `targetBaseUrl` is always taken from the source discovery run's own stored `config.targetBaseUrl` (`runStampede` in `src/stampede/run-stampede.ts`) rather than an arbitrary `--target` CLI flag, so Stampede can't be pointed anywhere the discovery run wasn't already validated against.
+- Stampede has **its own dedicated tables** (`stampede_runs`, `stampede_route_results` — migration 4, `src/db/migrations.ts`), not `runs`/`sessions`/`action_events`. A stampede run has no persona, no goal, and potentially thousands of requests per concurrency level — writing one `action_events` row per request would be the wrong shape (no real session to hang it off) and would bloat the discovery run's own event log for no benefit. `src/browser/session.ts`'s module doc comment anticipates Stampede reusing "this" (the browser-driving harness) — read narrowly: Stampede reuses `launchBrowser`/`contextOptionsForDevice` from `src/browser/index.ts` for consistent device emulation, but its replay engine (`src/stampede/replay.ts`) times raw `page.goto()` calls directly rather than routing through `BrowserSession`'s primitives, since those write to `action_events` via a `sessions` FK that doesn't semantically fit a load-test worker.
+- Only `navigate` targets from a discovery run count as a "route" to replay (`extractDiscoveredRoutes`, `src/stampede/routes.ts`) — `click`/`fill` targets are CSS selectors, not URLs, and replaying a full click/fill goal sequence at load-test volume would mutate app data with no teardown correlation to clean it up afterward (CONTEXT.md's "response time percentiles... per route" framing is about page-load performance, not full user journeys). Routes are normalized via the same `normalizeRoute` the matching tier uses, deduped, and sorted.
+- Each configured concurrency level runs **to completion before the next starts** (own browser contexts, own samples) — "how these numbers degrade as concurrency climbs" needs to be a clean before/after comparison, not several levels' traffic overlapping and confounding each other. Default levels `[1, 5, 10]` (`DEFAULT_CONCURRENCY_LEVELS`), each concurrent worker makes `iterationsPerWorker` (default 3) full passes through the route list.
+- Percentiles are **nearest-rank**, not interpolated (`percentile` in `src/stampede/metrics.ts`) — simple, deterministic, no statistics dependency, sufficient for a v1 load-testing tool. Error/success durations both count toward the percentile (a slow failure is still a real response-time data point); `errorCount`/`errorRate` is a separate metric alongside it, matching CONTEXT.md's "percentiles... **and** error rate" phrasing (not "percentiles of successful requests only"). A route counts as an error when `page.goto()` returns a `>= 400` status or throws (timeout, connection refused, ...).
+- `runStampede` accepts either `sourceRunId` (the CLI's only path — extracts routes + targetBaseUrl from that discovery run) or an explicit `routes`/`targetBaseUrl` pair (a programmatic escape hatch used by tests/smoke, bypassing the extraction step) — exactly one of the two, validated by `InvalidStampedeOptionsError`.
+- `drover stampede <run-id> --db <path> [--concurrency 1,5,10] [--iterations-per-worker 3]` is the CLI command — same `--db`-required pattern `analyze`/`report` established, since `<run-id>` alone doesn't say which SQLite file to open. Console-only output for now; results aren't yet folded into `drover report` (see `GAPS.md`).
+- `npm run smoke:stampede` needs **no credentials at all** (unlike every other smoke script) — it builds a small fixture "discovery run" directly via `DroverDb` (same precedent as `smoke-analyst.ts`), then spawns the real `drover stampede` CLI subprocess against the fixture site, so it runs for real every time rather than skip-gracefully-without-a-key.
+
 ---
 
 ## Known gaps (see `GAPS.md` and `TREELINE-GAPS.md` for full detail)
@@ -161,6 +176,7 @@ Highest-signal ones to know about before extending the codebase:
 - The analyst tier's `analystCeilingUsd` budget cap now counts real tokens via Anthropic's `countTokens` endpoint by default, but that path has never been exercised against a live API (no credentials in this build environment) — every test run so far has exercised its chars/4 fallback instead. Chunking's default chunk size (25 sessions) is also a guess, not derived from real run data.
 - treeLine's auth-wall detection and route-map crawl aren't exported as standalone/reusable surfaces — Drover's adapter re-implements a cheap password-field heuristic and approximates a route map via single-page link scraping instead of a real crawl. See `TREELINE-GAPS.md` for the asks that should eventually become treeLine issues.
 - treeLine is not consumable as a normal npm dependency (unpublished workspace package) — loaded via runtime dynamic import of the sibling checkout's built `dist/`, with a stub fallback if missing/unbuilt.
+- Stampede results aren't folded into `drover report` yet — console output only. No wall-clock safety ceiling on a stampede run either (unlike the dollar budget ceilings on the other two tiers, since there's no LLM cost at play) — a very large `iterationsPerWorker` against a slow site could still run long. Only one `deviceType` per invocation, and only `navigate`-derived routes are replayed (no full click/fill goal sequences) — see `GAPS.md`.
 
 ---
 
@@ -175,9 +191,11 @@ npm run smoke            # hardcoded browser-only sequence against a fixture sit
 npm run smoke:actor      # one real-model persona-session (needs ANTHROPIC_API_KEY)
 npm run smoke:orchestrator  # full CLI subprocess run against the fixture site
 npm run smoke:analyst    # fixture run + real Batch API analyst pass (needs ANTHROPIC_API_KEY)
+npm run smoke:stampede   # fixture discovery run + real load-test replay (no credentials needed)
 npm run drover -- run <domain-pack> [--config sim.config.ts] [--out path]
 npm run drover -- analyze <run-id> --db <path> [--poll-interval-ms <ms>]
 npm run drover -- report <run-id> --db <path> [--out report.md]
+npm run drover -- stampede <run-id> --db <path> [--concurrency 1,5,10] [--iterations-per-worker 3]
 ```
 
 `tests/fixtures/site.ts` is a self-contained local fixture site (nav, form, login, dashboard, console-error page, 500 endpoint) — used by both tests and smoke scripts so nothing depends on network access or Horse Haven staging being reachable. `SMOKE_URL=<url>` points smoke scripts at a real target instead.
