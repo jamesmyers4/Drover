@@ -137,6 +137,49 @@ describe("AnthropicModelProvider malformed decisions still report billed usage",
   });
 });
 
+describe("AnthropicModelProvider — parseDecision validation surfaces as MalformedDecisionError", () => {
+  it.each([
+    [
+      "an invalid actionType",
+      { reasoning: "ok", actionType: "teleport" },
+      /invalid actionType "teleport"/,
+    ],
+    [
+      "a navigate decision missing url",
+      { reasoning: "ok", actionType: "navigate" },
+      /actionType 'navigate' requires 'url'/,
+    ],
+    [
+      "a click decision missing selector",
+      { reasoning: "ok", actionType: "click" },
+      /actionType 'click' requires 'selector'/,
+    ],
+    [
+      "a fill decision missing selector",
+      { reasoning: "ok", actionType: "fill", value: "x" },
+      /actionType 'fill' requires 'selector'/,
+    ],
+    [
+      "a fill decision missing value",
+      { reasoning: "ok", actionType: "fill", selector: "#x" },
+      /actionType 'fill' requires 'value'/,
+    ],
+  ])("rejects %s", async (_label, input, messagePattern) => {
+    mockCreate.mockResolvedValueOnce({
+      content: [{ type: "tool_use", name: "decide_action", input }],
+      usage: BASE_USAGE,
+    });
+    const provider = new AnthropicModelProvider(DEFAULT_ACTOR_MODEL);
+
+    const err = await provider
+      .decide({ systemPrompt: "s", userPrompt: "u" })
+      .catch((e: unknown) => e);
+
+    expect(err).toBeInstanceOf(MalformedDecisionError);
+    expect((err as Error).message).toMatch(messagePattern);
+  });
+});
+
 describe("reasoning length is capped by truncation, not rejection", () => {
   it("passes a short reasoning string through unchanged", async () => {
     mockCreate.mockResolvedValueOnce({
@@ -277,6 +320,48 @@ describe("OllamaModelProvider", () => {
 
     expect(err).toBeInstanceOf(MalformedDecisionError);
     expect((err as Error).message).toMatch(/missing or empty 'reasoning'/);
+  });
+
+  it.each([
+    [
+      "an invalid actionType",
+      { reasoning: "ok", actionType: "teleport" },
+      /invalid actionType "teleport"/,
+    ],
+    [
+      "a navigate decision missing url",
+      { reasoning: "ok", actionType: "navigate" },
+      /actionType 'navigate' requires 'url'/,
+    ],
+    [
+      "a click decision missing selector",
+      { reasoning: "ok", actionType: "click" },
+      /actionType 'click' requires 'selector'/,
+    ],
+    [
+      "a fill decision missing selector",
+      { reasoning: "ok", actionType: "fill", value: "x" },
+      /actionType 'fill' requires 'selector'/,
+    ],
+    [
+      "a fill decision missing value",
+      { reasoning: "ok", actionType: "fill", selector: "#x" },
+      /actionType 'fill' requires 'value'/,
+    ],
+  ])("rejects %s", async (_label, args, messagePattern) => {
+    mockFetchOnce(200, {
+      message: {
+        tool_calls: [{ function: { name: "decide_action", arguments: args } }],
+      },
+    });
+    const provider = new OllamaModelProvider("llama3.1");
+
+    const err = await provider
+      .decide({ systemPrompt: "s", userPrompt: "u" })
+      .catch((e: unknown) => e);
+
+    expect(err).toBeInstanceOf(MalformedDecisionError);
+    expect((err as Error).message).toMatch(messagePattern);
   });
 
   it("throws a plain Error when the Ollama server responds with a non-OK status", async () => {

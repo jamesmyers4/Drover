@@ -351,9 +351,32 @@ finding recorded in `TESTING.md`'s decisions log.
   `recentHistory` (asserting the "haven't taken any actions yet" fallback
   line) and a non-empty one.
 
-### Session 2 — Actor tier: decision validation + loop pacing/fill
+### Session 2 — Actor tier: decision validation + loop pacing/fill — CLOSED 2026-07-25
 
 Close the remaining `src/actor/provider.ts` and `src/actor/loop.ts` gaps.
+
+**Disposition:** `src/actor/provider.ts` now 96.51%/93.15%/100%/96.29%
+(stmts/branch/funcs/lines; up from 90.7%/84.9%/100%) via 10 new `it.each`
+cases in `tests/actor/provider.test.ts` (5 validation scenarios ×
+Anthropic/Ollama each: invalid `actionType`, `navigate` missing `url`,
+`click` missing `selector`, `fill` missing `selector`, `fill` missing
+`value`). `src/actor/loop.ts` now 98.97%/86.27%/100%/98.92% (up from
+95.9%/80.4%/87.5%) via 2 new cases in `tests/actor/loop.test.ts`: pacing
+left enabled (`patience: 0`, the longest real per-action wait) proving the
+loop still completes correctly, and a `"fill"` decision driven end to end
+against the fixture site's `/signup` form, asserting the event lands with
+the right target. The `throw err;` rethrow-of-non-`DecisionParseError`
+branches (lines 206, 306) were left untested, per this plan's own
+either-is-fine allowance — `parseDecision` isn't exported, so forcing a
+non-`DecisionParseError` throw from it would need a `vi.mock` around
+`../../src/actor/provider.js` importing and overriding its own internals,
+which is more mocking complexity than the defensive branch is worth; it's
+structurally unreachable today given `parseDecision`'s only throw type.
+Also left uncovered: `provider.ts` line 120 (non-object tool-call payload)
+— lower priority per the plan's own text, not pursued. `loop.ts`'s one
+remaining gap (line 74, `executeAction`'s `"finish"` case) is the same
+already-logged `GAPS.md` dead-code observation this file's intro already
+calls out, not new. Full detail in `TESTING.md`'s decisions log.
 
 - Extend `tests/actor/provider.test.ts`: for both `AnthropicModelProvider`
   and `OllamaModelProvider`, add cases for an invalid `actionType`, a

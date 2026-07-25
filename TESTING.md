@@ -8,7 +8,7 @@ and `CONTEXT.md` first, same as any other work in this repo.
 
 ## What exists
 
-- **Unit/integration tests** — 26 files, 196 tests (`vitest run` / `npm
+- **Unit/integration tests** — 26 files, 208 tests (`vitest run` / `npm
   test`, current as of 2026-07-25 — trust a fresh `npm test` run's own
   summary over this number if it's drifted). Real coverage, not
   placeholder: `tests/fixtures/site.ts` is a local `node:http` fixture
@@ -564,3 +564,45 @@ Closed the two worst-covered actor-tier files:
 `TESTING-GAPS.md`'s Session 1 entry updated in place (struck through with a
 "CLOSED 2026-07-25" disposition) rather than deleted, matching this file's
 own historical-record convention.
+
+**2026-07-25 (TESTING-GAPS.md Session 2 — actor tier: decision validation +
+loop pacing/fill)** — Closed the remaining gaps in `src/actor/provider.ts`
+and `src/actor/loop.ts`:
+
+- Extended `tests/actor/provider.test.ts` with two `it.each` blocks (one
+  per provider) covering the five `parseDecision` validation branches never
+  exercised through a real provider before: invalid `actionType`, `navigate`
+  missing `url`, `click` missing `selector`, `fill` missing `selector`, and
+  `fill` missing `value` — each asserting `MalformedDecisionError` with a
+  message matching the specific `DecisionParseError` reason.
+  `src/actor/provider.ts` went from 90.7%/84.9%/100% to
+  96.51%/93.15%/100%/96.29% (stmts/branch/funcs/lines).
+- Decision on the `throw err;` rethrow-of-non-`DecisionParseError` branches
+  (`src/actor/provider.ts` lines 206 and 306, one per provider): left
+  untested. `parseDecision` isn't exported and only ever throws
+  `DecisionParseError`, so forcing this branch would mean `vi.mock`-ing the
+  provider module's own internals to inject a different throw type — real
+  mocking complexity for a branch that's genuinely defensive/unreachable
+  today, not a behavior anyone depends on. Recorded per this plan's own
+  "either is fine, just record the decision" allowance. Also left alone:
+  line 120 (a non-object tool-call `input`/`arguments` payload) — flagged
+  lower-priority in `TESTING-GAPS.md` itself, not pursued.
+- Extended `tests/actor/loop.test.ts` with two new cases: one that leaves
+  pacing enabled (`patience: 0`, the longest real per-action wait
+  `pacingMsForPatience` can produce — a real ~1s wall-clock wait across the
+  two-action scenario, accepted the same way this suite's existing
+  browser-driven tests already accept real waits) and asserts the session
+  still completes and succeeds correctly; one that drives an `actionType:
+  "fill"` decision through `runPersonaSession` end to end against the
+  fixture site's `/signup` form (`#signup-name`), asserting the fill event
+  lands in the DB with the right target. `src/actor/loop.ts` went from
+  95.9%/80.4%/87.5% to 98.97%/86.27%/100%/98.92%. The one line still
+  uncovered (74, `executeAction`'s `"finish"` case) is the same
+  already-`GAPS.md`-logged dead-code observation `TESTING-GAPS.md`'s own
+  intro already calls out — not a new finding, not pursued further here.
+- Test count went from 26 files/196 tests to 26 files/208 tests (12 new
+  cases: 10 `it.each` rows across both providers + 2 new loop cases).
+  `npm run typecheck`, `npm run lint`, and `npm test` all clean.
+
+`TESTING-GAPS.md`'s Session 2 entry updated in place with a "CLOSED
+2026-07-25" disposition, same convention as Session 1.

@@ -332,6 +332,110 @@ describe("runPersonaSession", () => {
   );
 
   it(
+    "still completes correctly with pacing enabled (patience-derived wait between actions)",
+    async () => {
+      await setUp();
+      const goal: Goal = {
+        id: "reach-dashboard-paced",
+        description: "Reach the dashboard.",
+        actionBudget: 5,
+        checkpoints: [
+          { id: "on-dashboard", description: "On the dashboard.", detector: "url:/dashboard" },
+        ],
+        successCheckpointId: "on-dashboard",
+      };
+      const provider = new ScriptedModelProvider([
+        { reasoning: "Start at the home page.", actionType: "navigate", url: `${site.baseUrl}/` },
+        {
+          reasoning: "Go to the dashboard.",
+          actionType: "navigate",
+          url: `${site.baseUrl}/dashboard`,
+        },
+      ]);
+
+      // patience: 0 -> pacingMsForPatience(0) = 500ms, the longest real wait
+      // this trait can produce — proves pacing doesn't break the loop, not
+      // just that disablePacing:true (every other test's default) works.
+      const result = await runPersonaSession({
+        db,
+        browserSession: session,
+        browser,
+        sessionId,
+        provider,
+        archetype: makeArchetype({ patience: 0 }),
+        domainPack,
+        goal,
+        treelineAdapter: stubAdapter,
+        targetBaseUrl: site.baseUrl,
+        budget: new SessionBudget(1),
+        screenshotDir: "runs/screenshots-test",
+      });
+
+      expect(result.status).toBe("completed");
+      expect(result.succeeded).toBe(true);
+      expect(result.actionsTaken).toBe(2);
+    },
+    TIMEOUT,
+  );
+
+  it(
+    "executes a fill decision end to end and records the event",
+    async () => {
+      await setUp();
+      const goal: Goal = {
+        id: "fill-signup",
+        description: "Fill out the signup form.",
+        actionBudget: 2,
+        checkpoints: [{ id: "never", description: "Never.", detector: "url:/never-reached" }],
+        successCheckpointId: "never",
+      };
+      const provider = new ScriptedModelProvider([
+        {
+          reasoning: "Go to the signup form.",
+          actionType: "navigate",
+          url: `${site.baseUrl}/signup`,
+        },
+        {
+          reasoning: "Enter my name.",
+          actionType: "fill",
+          selector: "#signup-name",
+          value: "Jane Volunteer",
+        },
+      ]);
+
+      const result = await runPersonaSession({
+        db,
+        browserSession: session,
+        browser,
+        sessionId,
+        provider,
+        archetype: makeArchetype(),
+        domainPack,
+        goal,
+        treelineAdapter: stubAdapter,
+        targetBaseUrl: site.baseUrl,
+        budget: new SessionBudget(1),
+        screenshotDir: "runs/screenshots-test",
+        disablePacing: true,
+      });
+
+      expect(result.status).toBe("completed");
+      expect(result.actionsTaken).toBe(2);
+
+      const events = db.getEventsBySession(sessionId);
+      const fillEvent = events.find((e) => e.actionType === "fill");
+      expect(fillEvent).toBeDefined();
+      expect(fillEvent?.target).toBe("#signup-name");
+      // The action budget was exhausted (the goal's checkpoint is never
+      // reachable), which is expected here — this test's own point is that
+      // the fill primitive ran and got logged, not that the goal succeeded.
+      const findings = db.getInSessionFindingsBySession(sessionId);
+      expect(findings.some((f) => f.type === "action-budget-exhausted")).toBe(true);
+    },
+    TIMEOUT,
+  );
+
+  it(
     "records the billed cost of a malformed decide_action call against budget, not just successful ones",
     async () => {
       await setUp();
