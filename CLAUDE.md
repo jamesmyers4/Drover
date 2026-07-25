@@ -127,7 +127,7 @@ These are decisions CONTEXT.md left open that got resolved during the build. Ful
 - CLI config/domain-pack loading: plain TS modules with a **default export**, loaded via `loadDefaultExport`.
 
 **Analyst tier**
-- One Batch API call per `drover analyze` invocation, covering every session in the run in a single prompt (not chunked, not per-session). Revisit if a real run's session count makes one prompt unwieldy.
+- `drover analyze` splits a run's session digests into groups of at most `sessionsPerChunk` (`DEFAULT_SESSIONS_PER_CHUNK = 25`, `RunAnalystOptions.sessionsPerChunk` / CLI `--sessions-per-chunk`) and issues one `provider.analyze()` call per chunk concurrently via `Promise.all` — for the real `BatchAnalystProvider` this is one independent Batch request per chunk, not one call covering every session in the run. Findings and cost from every chunk are aggregated into the final `RunAnalystResult`. Trade-off: cross-session correlation only happens *within* a chunk, so a pattern spanning sessions in two different chunks would be missed — see `GAPS.md`.
 - `computeCostUsd` doesn't know about Batch API's 50% discount; `BatchAnalystProvider` applies `BATCH_DISCOUNT = 0.5` itself after calling the shared pricing function.
 - Cross-session finding evidence (`screenshotPath`/`traceSnippet`) is **borrowed, not captured** — the analyst has no live browser, so it takes the first available screenshot from any of the finding's referenced sessions' own in-session findings, if one exists. Best-effort; ships without a screenshot otherwise.
 - `drover analyze` requires `--db <path>` (no default, unlike `drover run`) since a run id alone doesn't say which SQLite file it lives in. It does *not* need a `--config` flag — the analyst `ModelRoute` comes from the `Run` row's own stored config snapshot.
@@ -139,10 +139,10 @@ These are decisions CONTEXT.md left open that got resolved during the build. Ful
 
 Highest-signal ones to know about before extending the codebase:
 
-- No local/self-hosted (Ollama) provider yet — `restricted` domain packs can only run actor-tier on Anthropic today.
+- `OllamaModelProvider` exists but has never been run against a real local Ollama server — no install was available in this build environment. Small local models' real-world tool-calling reliability under the forced-JSON-schema contract is also unverified.
 - `SimConfig.concurrencyCap > 1` runs a real bounded worker pool now, but the run-level budget ceiling becomes best-effort (not exact) once concurrency is above 1 — see `GAPS.md`.
-- The analyst tier's digest now computes true per-checkpoint latency from `ActionEvent.checkpointId` (`checkpointReachTimesMs`), but the checkpoint is only ever identified by its raw id string — no description or goal-position context reaches the analyst.
-- The analyst tier's `analystCeilingUsd` budget cap is a pre-flight character-count-based estimate, not exact token accounting.
+- The analyst tier's digest now computes true per-checkpoint latency from `ActionEvent.checkpointId` (`checkpointReachTimesMs`), and `Run.checkpointContext` now gives it each checkpoint's description and owning goal — but still no position-within-goal ordering context.
+- The analyst tier's `analystCeilingUsd` budget cap now counts real tokens via Anthropic's `countTokens` endpoint by default, but that path has never been exercised against a live API (no credentials in this build environment) — every test run so far has exercised its chars/4 fallback instead. Chunking's default chunk size (25 sessions) is also a guess, not derived from real run data.
 - treeLine's auth-wall detection and route-map crawl aren't exported as standalone/reusable surfaces — Drover's adapter re-implements a cheap password-field heuristic and approximates a route map via single-page link scraping instead of a real crawl. See `TREELINE-GAPS.md` for the asks that should eventually become treeLine issues.
 - treeLine is not consumable as a normal npm dependency (unpublished workspace package) — loaded via runtime dynamic import of the sibling checkout's built `dist/`, with a stub fallback if missing/unbuilt.
 

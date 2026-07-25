@@ -1,4 +1,5 @@
 export {
+  DEFAULT_SESSIONS_PER_CHUNK,
   type RunAnalystOptions,
   type RunAnalystResult,
   RunNotFoundError,

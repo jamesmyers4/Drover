@@ -11,7 +11,7 @@
 import { mkdirSync } from "node:fs";
 import path from "node:path";
 import { Command } from "commander";
-import { runAnalyst } from "../analyst/analyze.js";
+import { DEFAULT_SESSIONS_PER_CHUNK, runAnalyst } from "../analyst/analyze.js";
 import { DroverDb } from "../db/database.js";
 import { loadDefaultExport } from "../orchestrator/config-loader.js";
 import { runDiscovery } from "../orchestrator/run-discovery.js";
@@ -69,7 +69,7 @@ async function runCommand(
 
 async function analyzeCommand(
   runId: string,
-  options: { db: string; pollIntervalMs: string },
+  options: { db: string; pollIntervalMs: string; sessionsPerChunk: string },
 ): Promise<void> {
   const db = new DroverDb(options.db);
   try {
@@ -86,6 +86,7 @@ async function analyzeCommand(
       db,
       runId,
       pollIntervalMs: Number(options.pollIntervalMs),
+      sessionsPerChunk: Number(options.sessionsPerChunk),
     });
 
     console.log(`  sessions analyzed:  ${result.sessionsAnalyzed}`);
@@ -132,13 +133,23 @@ program
     "path to the run's SQLite file (the --out path from `drover run`)",
   )
   .option("--poll-interval-ms <ms>", "Batch API polling interval in milliseconds", "5000")
-  .action(async (runId: string, options: { db: string; pollIntervalMs: string }) => {
-    try {
-      await analyzeCommand(runId, options);
-    } catch (err) {
-      console.error(err instanceof Error ? err.message : err);
-      process.exitCode = 1;
-    }
-  });
+  .option(
+    "--sessions-per-chunk <n>",
+    "max sessions per analyst request — splits a large run across multiple concurrent requests",
+    String(DEFAULT_SESSIONS_PER_CHUNK),
+  )
+  .action(
+    async (
+      runId: string,
+      options: { db: string; pollIntervalMs: string; sessionsPerChunk: string },
+    ) => {
+      try {
+        await analyzeCommand(runId, options);
+      } catch (err) {
+        console.error(err instanceof Error ? err.message : err);
+        process.exitCode = 1;
+      }
+    },
+  );
 
 program.parseAsync(process.argv);

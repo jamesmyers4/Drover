@@ -16,10 +16,10 @@ Two AI tiers currently exist: an **actor** tier that drives a real browser one p
 2. Runs persona-sessions **sequentially by default** — or through a bounded worker pool if `concurrencyCap` is set above 1 (see [Concurrency](#concurrency) below) — through a real Playwright browser, driven by an LLM (default `claude-haiku-4-5`) deciding one action at a time against a forced structured tool call — never free-text parsing.
 3. Logs every action (navigate/click/fill/read-page), console errors, page errors, and HTTP failures (≥400) as raw-timestamp events, plus a one-sentence reasoning annotation per action — never full chain-of-thought.
 4. Flags **in-session findings** live: console errors, HTTP 5xx, a checkpoint never reached within budget, or a hard-stop. A screenshot + short trace snippet is captured only at the moment a finding fires.
-5. Enforces a run-level hard dollar ceiling (checked between sessions, never mid-write) and a per-session soft cap (session ends `budget-capped`, not a crash). `drover analyze`'s single Batch call has its own optional hard ceiling (`budget.analystCeilingUsd`), checked pre-flight against an estimated cost — a Batch call is billed the instant it's submitted, so there's no mid-call point to cap it at.
+5. Enforces a run-level hard dollar ceiling (checked between sessions, never mid-write) and a per-session soft cap (session ends `budget-capped`, not a crash). `drover analyze`'s Batch call(s) have their own optional hard ceiling (`budget.analystCeilingUsd`), checked pre-flight against an estimated cost summed across every chunk — a Batch call is billed the instant it's submitted, so there's no mid-call point to cap it at.
 6. Tears down anything the run created (via the domain pack's optional `teardown` hook) and reconciles findings against prior runs of the same app (`new` / `still-open` / `resolved`).
 
-**Cross-session analysis** — a separate `drover analyze <run-id>` command loads every session from a completed run, builds a compact digest per session (derived metrics + capped action trace + in-session findings), and sends the whole batch to Sonnet in a single real Anthropic **Batch API** call (50% off, no latency requirement — this is post-hoc analysis). It looks for patterns no single actor session would notice: duplicate dead-end labels, a route several personas independently stumble on, a checkpoint that's technically reachable but abnormally slow. Malformed model output is validated, logged, and skipped — it never crashes the run. Findings are reconciled a second time once written, since cross-session findings don't exist until `analyze` has run (see [Cross-run finding matching](#cross-run-finding-matching) below).
+**Cross-session analysis** — a separate `drover analyze <run-id>` command loads every session from a completed run, builds a compact digest per session (derived metrics + capped action trace + in-session findings), and sends them to Sonnet via the real Anthropic **Batch API** (50% off, no latency requirement — this is post-hoc analysis). Digests are split into groups of at most `--sessions-per-chunk` (default 25) sessions, each its own concurrent Batch request, rather than one prompt covering every session — keeps a large run's prompt size bounded, at the cost of only correlating patterns *within* a chunk (a pattern spanning two sessions in different chunks would be missed; see [Concurrency](#concurrency) for the analogous trade-off on the actor-tier side). It looks for patterns no single actor session would notice: duplicate dead-end labels, a route several personas independently stumble on, a checkpoint that's technically reachable but abnormally slow. Malformed model output is validated, logged, and skipped — it never crashes the run. Findings are reconciled a second time once written, since cross-session findings don't exist until `analyze` has run (see [Cross-run finding matching](#cross-run-finding-matching) below).
 
 Not built yet: a `drover report` command that turns the SQLite data into a markdown report, and Stampede mode (scripted, non-reasoning load replay of discovered routes).
 
@@ -131,7 +131,7 @@ interface SimConfig {
   budget: {
     runCeilingUsd: number;         // hard ceiling, checked between sessions
     perSessionSoftCapUsd: number;  // soft cap, ends one session gracefully
-    analystCeilingUsd?: number;    // hard ceiling for `drover analyze`'s single Batch call, checked pre-flight
+    analystCeilingUsd?: number;    // hard ceiling for `drover analyze`'s Batch call(s), checked pre-flight
   };
   modelRouting: {
     actor: { provider: string; model: string };
@@ -175,11 +175,11 @@ Reconciliation is **two-phase**: `drover run` reconciles right after a run finis
 
 ```
 drover run <domain-pack> [--config sim.config.ts] [--out path]
-drover analyze <run-id> --db <path> [--poll-interval-ms <ms>]
+drover analyze <run-id> --db <path> [--poll-interval-ms <ms>] [--sessions-per-chunk <n>]
 ```
 
 - `<domain-pack>` and `--config` are paths to local TypeScript modules with a default export (a `DomainPack` and `SimConfig` respectively). `--out` defaults to `runs/<timestamp>.sqlite`.
-- `drover analyze` requires `--db <path>` (no default — a run id alone doesn't say which SQLite file it lives in) and does *not* take a `--config` flag; it reads the analyst model route from the run's own stored config snapshot.
+- `drover analyze` requires `--db <path>` (no default — a run id alone doesn't say which SQLite file it lives in) and does *not* take a `--config` flag; it reads the analyst model route from the run's own stored config snapshot. `--sessions-per-chunk` defaults to 25 — see [Cross-session analysis](#what-it-does-today) above.
 - `drover report` does not exist yet (Session 6 scope).
 
 ## Repo layout

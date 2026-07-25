@@ -4,8 +4,11 @@ import {
   RunNotFoundError,
   runAnalyst,
 } from "../../src/analyst/analyze.js";
+import { estimateAnalystCostUsd } from "../../src/analyst/budget.js";
+import type { SessionDigest } from "../../src/analyst/digest.js";
+import { buildAnalystSystemPrompt, buildAnalystUserPrompt } from "../../src/analyst/prompt.js";
 import type { RawCrossSessionFinding } from "../../src/analyst/provider.js";
-import { ScriptedAnalystProvider } from "../../src/analyst/provider.js";
+import { DEFAULT_MAX_TOKENS, ScriptedAnalystProvider } from "../../src/analyst/provider.js";
 import { DroverDb, newId } from "../../src/db/database.js";
 import { reconcileRunFindings } from "../../src/orchestrator/reconcile.js";
 import type { InSessionFinding, PersonaSession, Run, SimConfig } from "../../src/types/index.js";
@@ -138,6 +141,136 @@ describe("runAnalyst", () => {
 
     expect(capturedUserPrompt).toContain(
       'cp-signup-complete ("User submits the signup form", goal: g1)',
+    );
+  });
+
+  it("splits sessions across multiple analyze() calls when sessionsPerChunk is smaller than the session count, and aggregates every call's findings and cost", async () => {
+    const { run, sessions } = makeRunWithSessions(5);
+    const [s0, s1, s2, s3, s4] = sessions;
+    if (!s0 || !s1 || !s2 || !s3 || !s4) throw new Error("unreachable");
+
+    const capturedPrompts: string[] = [];
+    let callCount = 0;
+    const provider = {
+      provider: "captured",
+      model: "captured",
+      analyze: async (req: { systemPrompt: string; userPrompt: string }) => {
+        callCount++;
+        capturedPrompts.push(req.userPrompt);
+        return {
+          findings: [
+            {
+              type: "recurring-dead-end" as const,
+              severity: "low" as const,
+              description: `finding from call ${callCount}`,
+              sessionIds: [s0.id],
+              route: `/call-${callCount}`,
+            },
+          ],
+          usage: {
+            inputTokens: 0,
+            outputTokens: 0,
+            cacheWriteTokens: 0,
+            cacheReadTokens: 0,
+            costUsd: 0.01,
+          },
+        };
+      },
+    };
+
+    const result = await runAnalyst({ db, runId: run.id, provider, sessionsPerChunk: 2 });
+
+    // 5 sessions at 2 per chunk -> chunks of [s0,s1], [s2,s3], [s4].
+    expect(callCount).toBe(3);
+    expect(capturedPrompts[0]).toContain(s0.id);
+    expect(capturedPrompts[0]).toContain(s1.id);
+    expect(capturedPrompts[0]).not.toContain(s2.id);
+    expect(capturedPrompts[1]).toContain(s2.id);
+    expect(capturedPrompts[1]).toContain(s3.id);
+    expect(capturedPrompts[2]).toContain(s4.id);
+    expect(capturedPrompts[2]).not.toContain(s3.id);
+
+    // Findings and cost from every chunk landed, not just the last call's.
+    expect(result.sessionsAnalyzed).toBe(5);
+    expect(result.findingsWritten).toBe(3);
+    expect(result.costUsd).toBeCloseTo(0.03, 5);
+    const findings = db.getCrossSessionFindingsByRun(run.id);
+    expect(findings.map((f) => f.matchKey).sort()).toEqual([
+      "recurring-dead-end:/call-1",
+      "recurring-dead-end:/call-2",
+      "recurring-dead-end:/call-3",
+    ]);
+  });
+
+  it("sums the pre-flight cost estimate across all chunks, not just one, before enforcing analystCeilingUsd", async () => {
+    // Independently compute what a single one-session chunk's estimate looks
+    // like (same shape runAnalyst will build per chunk below), so the
+    // ceiling here is derived rather than a guessed magic number.
+    const model = "claude-sonnet-5";
+    const probeDigest: SessionDigest = {
+      sessionId: newId(),
+      personaId: "p0",
+      goalId: "g1",
+      status: "completed",
+      actionCount: 1,
+      checkpointReachTimesMs: {},
+      findingsSummary: [],
+      actionsSummary: ["[navigate] /schedule/edit — trying to edit the feeding schedule"],
+    };
+    const systemPrompt = buildAnalystSystemPrompt();
+    const singleChunkUserPrompt = buildAnalystUserPrompt([probeDigest]);
+    const singleChunkEstimate = await estimateAnalystCostUsd(
+      model,
+      systemPrompt,
+      singleChunkUserPrompt,
+      DEFAULT_MAX_TOKENS,
+    );
+
+    // Comfortably above one chunk's estimate, comfortably below what 4
+    // one-session chunks' estimates would sum to — only summing across
+    // chunks (not just checking the first) can trip this ceiling.
+    const ceilingUsd = singleChunkEstimate * 2;
+
+    const tightConfig: SimConfig = {
+      ...config,
+      modelRouting: { ...config.modelRouting, analyst: { provider: "anthropic", model } },
+      budget: { ...config.budget, analystCeilingUsd: ceilingUsd },
+    };
+    const run: Run = {
+      id: newId(),
+      appName,
+      config: tightConfig,
+      status: "completed",
+      startedAt: 1000,
+    };
+    db.insertRun(run);
+    for (let i = 0; i < 4; i++) {
+      db.insertSession({
+        id: newId(),
+        runId: run.id,
+        personaId: `p${i}`,
+        goalId: "g1",
+        status: "completed",
+        startedAt: 1000,
+        endedAt: 2000,
+      });
+    }
+
+    const provider = new ScriptedAnalystProvider([]);
+    const analyzeSpy = vi.spyOn(provider, "analyze");
+
+    await expect(runAnalyst({ db, runId: run.id, provider, sessionsPerChunk: 1 })).rejects.toThrow(
+      AnalystBudgetExceededError,
+    );
+    expect(analyzeSpy).not.toHaveBeenCalled();
+  });
+
+  it("rejects a non-positive sessionsPerChunk instead of looping forever", async () => {
+    const { run } = makeRunWithSessions(1);
+    const provider = new ScriptedAnalystProvider([]);
+
+    await expect(runAnalyst({ db, runId: run.id, provider, sessionsPerChunk: 0 })).rejects.toThrow(
+      /sessionsPerChunk/,
     );
   });
 
