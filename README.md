@@ -146,7 +146,7 @@ interface SimConfig {
 Actor-tier model choice is a per-domain-pack decision (`dataPolicy`), never a silent default, and it's **enforced**, not advisory:
 
 - **`synthetic-only`** domain packs (e.g. Horse Haven Ops, seeded with fake data only): any provider is an acceptable actor-tier choice, since no real person's data is at risk.
-- **`restricted`** domain packs (any app touching real personal/legal/medical data): the actor tier must run on an approved provider. Today that allowlist is just `["anthropic"]` (`assertDataPolicyAllowed` in `src/actor/provider.ts`) — there is **no local/Ollama provider yet**, so a `restricted` pack with no Anthropic budget currently has no cheaper option (tracked in `GAPS.md`).
+- **`restricted`** domain packs (any app touching real personal/legal/medical data): the actor tier must run on an approved provider — currently `anthropic` or `ollama` (`assertDataPolicyAllowed` in `src/actor/provider.ts`). `ollama` runs against a local/self-hosted server (`OllamaModelProvider`, default `http://localhost:11434`, override via the `OLLAMA_HOST` env var or an explicit `baseUrl` constructor arg) — nothing leaves the machine, making it the zero-exposure option for a `restricted` pack with no Anthropic budget. Pick a tool-calling-capable local model (e.g. `llama3.1`, `qwen2.5`); one that doesn't support tool calls just surfaces as a `MalformedDecisionError` per attempt rather than crashing the session.
 - Regardless of provider or policy, **secrets never enter prompt content**: auth tokens, session cookies, and API keys live only in the orchestrator's HTTP layer. `fill()` primitive values are likewise never written to the event log — only the selector is (same principle, one layer deeper).
 
 ## Concurrency (not yet implemented)

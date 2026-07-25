@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 // The real SDK's `messages` is an instance property set in the constructor
 // (`this.messages = new API.Messages(this)`), not a prototype getter, so it
@@ -20,8 +20,10 @@ const {
   createModelProvider,
   DataPolicyViolationError,
   DEFAULT_ACTOR_MODEL,
+  DEFAULT_OLLAMA_BASE_URL,
   MalformedDecisionError,
   MAX_REASONING_LENGTH,
+  OllamaModelProvider,
   ScriptedModelProvider,
 } = await import("../../src/actor/provider.js");
 
@@ -45,6 +47,12 @@ describe("assertDataPolicyAllowed", () => {
     ).not.toThrow();
   });
 
+  it("allows ollama for restricted domain packs (zero-exposure local model)", () => {
+    expect(() =>
+      assertDataPolicyAllowed("restricted", { provider: "ollama", model: "llama3.1" }),
+    ).not.toThrow();
+  });
+
   it("refuses a non-approved provider for restricted domain packs", () => {
     expect(() =>
       assertDataPolicyAllowed("restricted", { provider: "some-cheap-provider", model: "x" }),
@@ -57,6 +65,12 @@ describe("createModelProvider", () => {
     const provider = createModelProvider({ provider: "anthropic", model: "claude-haiku-4-5" });
     expect(provider).toBeInstanceOf(AnthropicModelProvider);
     expect(provider.model).toBe("claude-haiku-4-5");
+  });
+
+  it("builds an OllamaModelProvider for provider 'ollama'", () => {
+    const provider = createModelProvider({ provider: "ollama", model: "llama3.1" });
+    expect(provider).toBeInstanceOf(OllamaModelProvider);
+    expect(provider.model).toBe("llama3.1");
   });
 
   it("rejects an unsupported provider", () => {
@@ -161,6 +175,137 @@ describe("reasoning length is capped by truncation, not rejection", () => {
     expect(result.decision.reasoning.length).toBe(MAX_REASONING_LENGTH);
     expect(result.decision.reasoning.endsWith("…")).toBe(true);
     expect(result.decision.reasoning.startsWith("a".repeat(MAX_REASONING_LENGTH - 1))).toBe(true);
+  });
+});
+
+describe("OllamaModelProvider", () => {
+  function mockFetchOnce(status: number, jsonBody: unknown) {
+    const mockFetch = vi.fn().mockResolvedValueOnce({
+      ok: status >= 200 && status < 300,
+      status,
+      json: () => Promise.resolve(jsonBody),
+      text: () => Promise.resolve(JSON.stringify(jsonBody)),
+    });
+    vi.stubGlobal("fetch", mockFetch);
+    return mockFetch;
+  }
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("defaults to the local Ollama server and posts to /api/chat", async () => {
+    const mockFetch = mockFetchOnce(200, {
+      message: {
+        tool_calls: [
+          {
+            function: {
+              name: "decide_action",
+              arguments: { reasoning: "go", actionType: "finish", outcome: "success" },
+            },
+          },
+        ],
+      },
+      prompt_eval_count: 50,
+      eval_count: 5,
+    });
+    const provider = new OllamaModelProvider("llama3.1");
+
+    await provider.decide({ systemPrompt: "s", userPrompt: "u" });
+
+    expect(mockFetch).toHaveBeenCalledWith(
+      `${DEFAULT_OLLAMA_BASE_URL}/api/chat`,
+      expect.objectContaining({ method: "POST" }),
+    );
+  });
+
+  it("parses a well-formed decide_action tool call with zero cost", async () => {
+    mockFetchOnce(200, {
+      message: {
+        tool_calls: [
+          {
+            function: {
+              name: "decide_action",
+              arguments: { reasoning: "click it", actionType: "click", selector: "#go" },
+            },
+          },
+        ],
+      },
+      prompt_eval_count: 100,
+      eval_count: 10,
+    });
+    const provider = new OllamaModelProvider("llama3.1");
+
+    const result = await provider.decide({ systemPrompt: "s", userPrompt: "u" });
+
+    expect(result.decision.actionType).toBe("click");
+    expect(result.usage.costUsd).toBe(0);
+    expect(result.usage.inputTokens).toBe(100);
+    expect(result.usage.outputTokens).toBe(10);
+  });
+
+  it("throws MalformedDecisionError with zero-cost usage when no tool call comes back", async () => {
+    mockFetchOnce(200, {
+      message: { content: "I decided not to call a tool" },
+      prompt_eval_count: 20,
+      eval_count: 8,
+    });
+    const provider = new OllamaModelProvider("a-model-with-no-tool-support");
+
+    const err = await provider
+      .decide({ systemPrompt: "s", userPrompt: "u" })
+      .catch((e: unknown) => e);
+
+    expect(err).toBeInstanceOf(MalformedDecisionError);
+    const malformed = err as InstanceType<typeof MalformedDecisionError>;
+    expect(malformed.usage?.costUsd).toBe(0);
+  });
+
+  it("throws MalformedDecisionError when the tool call arguments fail validation", async () => {
+    mockFetchOnce(200, {
+      message: {
+        tool_calls: [
+          { function: { name: "decide_action", arguments: { actionType: "navigate" } } },
+        ],
+      },
+    });
+    const provider = new OllamaModelProvider("llama3.1");
+
+    const err = await provider
+      .decide({ systemPrompt: "s", userPrompt: "u" })
+      .catch((e: unknown) => e);
+
+    expect(err).toBeInstanceOf(MalformedDecisionError);
+    expect((err as Error).message).toMatch(/missing or empty 'reasoning'/);
+  });
+
+  it("throws a plain Error when the Ollama server responds with a non-OK status", async () => {
+    mockFetchOnce(500, { error: "model not found" });
+    const provider = new OllamaModelProvider("nonexistent-model");
+
+    await expect(provider.decide({ systemPrompt: "s", userPrompt: "u" })).rejects.toThrow(
+      /Ollama request .* failed: 500/,
+    );
+  });
+
+  it("respects an explicit baseUrl override", async () => {
+    const mockFetch = mockFetchOnce(200, {
+      message: {
+        tool_calls: [
+          {
+            function: {
+              name: "decide_action",
+              arguments: { reasoning: "go", actionType: "finish", outcome: "success" },
+            },
+          },
+        ],
+      },
+    });
+    const provider = new OllamaModelProvider("llama3.1", "http://remote-host:11434");
+
+    await provider.decide({ systemPrompt: "s", userPrompt: "u" });
+
+    expect(mockFetch).toHaveBeenCalledWith("http://remote-host:11434/api/chat", expect.anything());
   });
 });
 

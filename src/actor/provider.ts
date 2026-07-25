@@ -1,9 +1,9 @@
 /**
  * Model client behind a provider interface (CONTEXT.md "Model routing &
- * cost" / "Data routing & privacy"). The actor tier's only real
- * implementation in Session 3 is Anthropic (default Haiku); other providers
- * are a config-time choice for later sessions — see GAPS.md for the
- * Ollama/local-model gap.
+ * cost" / "Data routing & privacy"). Two real implementations: Anthropic
+ * (default Haiku, real-time) and Ollama (local/self-hosted, the
+ * zero-exposure option for `restricted` domain packs — see the class docs
+ * below and GAPS.md's closed "no local provider" entry).
  *
  * Structured output only: every decision comes back through a forced
  * `decide_action` tool call, never free-text parsing (CLAUDE.md Session 3).
@@ -209,6 +209,106 @@ export class AnthropicModelProvider implements ModelProvider {
   }
 }
 
+/** Default local Ollama server address, matching Ollama's own `OLLAMA_HOST` convention. */
+export const DEFAULT_OLLAMA_BASE_URL = "http://localhost:11434";
+
+/** Same schema as `DECIDE_TOOL.input_schema`, framed as an OpenAI-style function for Ollama's `tools`. */
+const OLLAMA_DECIDE_TOOL = {
+  type: "function",
+  function: {
+    name: DECIDE_TOOL.name,
+    description: DECIDE_TOOL.description,
+    parameters: DECIDE_TOOL.input_schema,
+  },
+} as const;
+
+interface OllamaChatResponse {
+  message?: {
+    content?: string;
+    tool_calls?: Array<{ function?: { name?: string; arguments?: unknown } }>;
+  };
+  prompt_eval_count?: number;
+  eval_count?: number;
+}
+
+/**
+ * Local/self-hosted provider via Ollama's `/api/chat` endpoint
+ * (https://github.com/ollama/ollama/blob/main/docs/api.md#chat-request-with-tools).
+ * This is CONTEXT.md's "Data routing & privacy" zero-exposure option for
+ * `restricted` domain packs when even Anthropic's data handling isn't
+ * acceptable, or when cost is a concern beyond staying on a paid provider —
+ * nothing ever leaves the machine running Ollama. Cost is always `0`: there's
+ * no per-token billing for a local model, so `costUsd` doesn't run through
+ * `computeCostUsd`/`PRICING` the way Anthropic calls do (a local Ollama
+ * install has no meaningful "pricing table" entry to add).
+ *
+ * Not every locally-installed model supports tool/function calling — one
+ * that doesn't will simply never return a `tool_calls` entry, which this
+ * treats the same as Anthropic's "no tool_use block" case: a
+ * `MalformedDecisionError`, not a crash. Pick a tool-calling-capable model
+ * (e.g. `llama3.1`, `qwen2.5`) when configuring a domain pack's actor route.
+ */
+export class OllamaModelProvider implements ModelProvider {
+  readonly provider = "ollama";
+  private readonly baseUrl: string;
+
+  constructor(
+    readonly model: string,
+    baseUrl?: string,
+  ) {
+    this.baseUrl = baseUrl ?? process.env.OLLAMA_HOST ?? DEFAULT_OLLAMA_BASE_URL;
+  }
+
+  async decide(request: ActorDecideRequest): Promise<ActorDecideResult> {
+    const response = await fetch(`${this.baseUrl}/api/chat`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        model: this.model,
+        stream: false,
+        messages: [
+          { role: "system", content: request.systemPrompt },
+          { role: "user", content: request.userPrompt },
+        ],
+        tools: [OLLAMA_DECIDE_TOOL],
+      }),
+    });
+    if (!response.ok) {
+      throw new Error(
+        `Ollama request to ${this.baseUrl} failed: ${response.status} ${await response.text()}`,
+      );
+    }
+    const body = (await response.json()) as OllamaChatResponse;
+
+    // No per-token billing for a local model — usage counts are recorded for
+    // observability only, cost is always zero.
+    const usage: TokenUsage = {
+      inputTokens: body.prompt_eval_count ?? 0,
+      outputTokens: body.eval_count ?? 0,
+      cacheWriteTokens: 0,
+      cacheReadTokens: 0,
+    };
+    const billedUsage = { ...usage, costUsd: 0 };
+
+    const toolCall = body.message?.tool_calls?.find((c) => c.function?.name === "decide_action");
+    if (!toolCall) {
+      throw new MalformedDecisionError(
+        "no decide_action tool call in Ollama response",
+        billedUsage,
+      );
+    }
+    let decision: ActorDecision;
+    try {
+      decision = parseDecision(toolCall.function?.arguments);
+    } catch (err) {
+      if (err instanceof DecisionParseError)
+        throw new MalformedDecisionError(err.message, billedUsage);
+      throw err;
+    }
+    return { decision, usage: billedUsage };
+  }
+}
+
 /** Scripted/mocked provider for testing loop mechanics without a real model call. */
 export class ScriptedModelProvider implements ModelProvider {
   readonly provider = "scripted";
@@ -241,11 +341,13 @@ export class ScriptedModelProvider implements ModelProvider {
 
 /**
  * Providers acceptable for `restricted` domain packs (CONTEXT.md "Data
- * routing & privacy"): Anthropic or another provider with clear contractual
- * data handling, or a fully local model. Only Anthropic is implemented as
- * of Session 3 — see GAPS.md for the Ollama/local-model gap.
+ * routing & privacy"): Anthropic (or another provider with clear contractual
+ * data handling) or a fully local model. `ollama` is approved as the
+ * zero-exposure alternative CONTEXT.md names explicitly — nothing leaves the
+ * machine running it, so it carries no less data-handling assurance than
+ * Anthropic for a `restricted` pack.
  */
-const APPROVED_RESTRICTED_PROVIDERS = new Set(["anthropic"]);
+const APPROVED_RESTRICTED_PROVIDERS = new Set(["anthropic", "ollama"]);
 
 export class DataPolicyViolationError extends Error {
   constructor(dataPolicy: DomainPack["dataPolicy"], provider: string) {
@@ -271,9 +373,11 @@ export function createModelProvider(route: ModelRoute): ModelProvider {
   switch (route.provider) {
     case "anthropic":
       return new AnthropicModelProvider(route.model);
+    case "ollama":
+      return new OllamaModelProvider(route.model);
     default:
       throw new Error(
-        `Unsupported actor-tier provider "${route.provider}" — only "anthropic" is implemented (Session 3). See GAPS.md.`,
+        `Unsupported actor-tier provider "${route.provider}" — only "anthropic" and "ollama" are implemented.`,
       );
   }
 }

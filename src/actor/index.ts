@@ -41,8 +41,10 @@ export {
   createModelProvider,
   DataPolicyViolationError,
   DEFAULT_ACTOR_MODEL,
+  DEFAULT_OLLAMA_BASE_URL,
   MalformedDecisionError,
   type ModelProvider,
+  OllamaModelProvider,
   ScriptedModelProvider,
 } from "./provider.js";
 export { buildRouteMapContext } from "./route-map.js";
