@@ -85,7 +85,25 @@ const pages: Record<string, { status: number; contentType: string; body: string 
       <script>null.foo();</script>
     </body></html>`,
   },
+  "/async-redirect": {
+    status: 200,
+    contentType: "text/html",
+    body: `<!doctype html><html><head><title>Async redirect</title></head><body>
+      <h1>Async redirect</h1>
+      <button id="submit" onclick="fetch('/api/slow-action').then(() => history.pushState(null, '', '/async-redirect?result=done'))">Submit</button>
+    </body></html>`,
+  },
+  "/api/slow-action": {
+    status: 200,
+    contentType: "application/json",
+    body: '{"ok":true}',
+  },
 };
+
+/** Server-side delay (ms) before /api/slow-action responds — simulates a
+ * Server-Action-style fetch that resolves after the click primitive itself
+ * has already returned. */
+const SLOW_ACTION_DELAY_MS = 300;
 
 export interface FixtureSite {
   baseUrl: string;
@@ -101,8 +119,15 @@ export async function startFixtureSite(): Promise<FixtureSite> {
       res.end("not found");
       return;
     }
-    res.writeHead(page.status, { "content-type": page.contentType });
-    res.end(page.body);
+    const respond = () => {
+      res.writeHead(page.status, { "content-type": page.contentType });
+      res.end(page.body);
+    };
+    if (url.pathname === "/api/slow-action") {
+      setTimeout(respond, SLOW_ACTION_DELAY_MS);
+    } else {
+      respond();
+    }
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const { port } = server.address() as AddressInfo;

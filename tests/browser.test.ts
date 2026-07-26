@@ -116,9 +116,14 @@ describe("BrowserSession", () => {
       try {
         await session.navigate(`${site.baseUrl}/broken`, "Visit the broken page.");
         await session.navigate(`${site.baseUrl}/horses`, "Go to the horses page.");
+        // Register the waiter before clicking — click() now waits out
+        // in-flight network activity itself, so the response may already
+        // have landed by the time click() resolves.
+        const responseArrived = session.page.waitForResponse((r) =>
+          r.url().includes("/api/horses/page2"),
+        );
         await session.click("#load-more", "Ask for more horses.");
-        // The 500 response arrives async; give the listener a beat.
-        await session.page.waitForResponse((r) => r.url().includes("/api/horses/page2"));
+        await responseArrived;
       } finally {
         await session.close();
       }
@@ -195,6 +200,21 @@ describe("BrowserSession", () => {
       const failure = events.find((e) => e.actionType === "action-error");
       expect(failure?.target).toBe("#does-not-exist");
       expect(failure?.reasoning).toContain("Action failed");
+    },
+    INTEGRATION_TIMEOUT,
+  );
+
+  it(
+    "click waits out an async fetch-backed redirect before returning",
+    async () => {
+      const session = await BrowserSession.open(browser, { sessionId, db, deviceType: "desktop" });
+      try {
+        await session.navigate(`${site.baseUrl}/async-redirect`, "Open the async-redirect page.");
+        await session.click("#submit", "Submit the async action.");
+        expect(session.page.url()).toBe(`${site.baseUrl}/async-redirect?result=done`);
+      } finally {
+        await session.close();
+      }
     },
     INTEGRATION_TIMEOUT,
   );

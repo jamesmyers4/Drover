@@ -31,7 +31,7 @@ const domainPack: DomainPack = {
   goals: [
     {
       id: "kiosk-checkin-toggle",
-      description: `Go to the barn kiosk check-in page and enter the check-in code ${TEST_CHECKIN_CODE}, then submit it to check in or out.`,
+      description: `Navigate directly to http://localhost:3000/kiosk — the barn kiosk check-in page, which needs no login. Do not sign in or look for a login link; go straight to that URL. Enter the check-in code ${TEST_CHECKIN_CODE}, then submit it to check in or out.`,
       actionBudget: 4,
       checkpoints: [
         {
@@ -46,7 +46,7 @@ const domainPack: DomainPack = {
     {
       id: "kiosk-invalid-code",
       description:
-        "Go to the barn kiosk check-in page and enter the code ZZZZ99, which does not belong to any real volunteer, then submit it.",
+        "Navigate directly to http://localhost:3000/kiosk — the barn kiosk check-in page, which needs no login. Do not sign in or look for a login link; go straight to that URL. Enter the code ZZZZ99, which does not belong to any real volunteer, then submit it.",
       actionBudget: 4,
       checkpoints: [
         {

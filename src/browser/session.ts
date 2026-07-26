@@ -146,6 +146,13 @@ export class BrowserSession {
   async click(selector: string, reasoning: string, checkpointId?: string): Promise<string> {
     return this.performAction("click", selector, reasoning, checkpointId, async () => {
       await this.page.locator(selector).first().click();
+      // A click's real effect can be an async client-side transition (e.g. a
+      // fetch-backed Server Action redirecting via history.pushState) that
+      // Playwright's click() itself never waits on, unlike a real navigation.
+      // Give in-flight network activity a bounded chance to settle before the
+      // caller re-checks the page (checkpoints), without ever failing the
+      // click over it.
+      await this.page.waitForLoadState("networkidle", { timeout: 2000 }).catch(() => {});
     });
   }
 
