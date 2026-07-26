@@ -7,7 +7,7 @@
  * registered first, hence the `tsx/esm/api` register() call before either
  * dynamic import happens.
  */
-
+import "dotenv/config";
 import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { Command } from "commander";
@@ -39,12 +39,21 @@ async function runCommand(
 ): Promise<void> {
   await registerTsLoader();
 
-  const domainPack = await loadDefaultExport<DomainPack>(domainPackPath, "domain pack");
-  const config = await loadDefaultExport<SimConfig>(options.config, "sim config");
+  const domainPack = await loadDefaultExport<DomainPack>(
+    domainPackPath,
+    "domain pack",
+  );
+  const config = await loadDefaultExport<SimConfig>(
+    options.config,
+    "sim config",
+  );
 
   const outPath = options.out ?? path.join("runs", `${Date.now()}.sqlite`);
   mkdirSync(path.dirname(outPath) || ".", { recursive: true });
-  const screenshotDir = path.join(path.dirname(outPath) || "runs", "screenshots");
+  const screenshotDir = path.join(
+    path.dirname(outPath) || "runs",
+    "screenshots",
+  );
 
   console.log(`Running "${domainPack.appName}"`);
   console.log(`  dimensions: ${JSON.stringify(config.runDimensions)}`);
@@ -55,7 +64,12 @@ async function runCommand(
 
   const db = new DroverDb(outPath);
   try {
-    const result = await runDiscovery({ db, domainPack, config, screenshotDir });
+    const result = await runDiscovery({
+      db,
+      domainPack,
+      config,
+      screenshotDir,
+    });
 
     console.log(`Run ${result.runId}: ${result.status}`);
     console.log(`  sessions scheduled:     ${result.sessionsScheduled}`);
@@ -108,7 +122,10 @@ async function analyzeCommand(
   }
 }
 
-async function reportCommand(runId: string, options: { db: string; out?: string }): Promise<void> {
+async function reportCommand(
+  runId: string,
+  options: { db: string; out?: string },
+): Promise<void> {
   const db = new DroverDb(options.db);
   try {
     const report = buildRunReport(db, runId);
@@ -157,7 +174,9 @@ async function stampedeCommand(
       iterationsPerWorker,
     });
 
-    console.log(`Stampede run ${result.stampedeRunId} against ${result.targetBaseUrl}`);
+    console.log(
+      `Stampede run ${result.stampedeRunId} against ${result.targetBaseUrl}`,
+    );
     console.log(`  routes: ${result.routes.join(", ")}\n`);
     console.log(
       `  ${"route".padEnd(30)}${"conc".padEnd(6)}${"samples".padEnd(9)}${"errors".padEnd(8)}${"p50".padEnd(8)}${"p95".padEnd(8)}p99`,
@@ -175,22 +194,39 @@ async function stampedeCommand(
 const program = new Command();
 program
   .name("drover")
-  .description("Config-driven simulation harness that runs AI-driven personas through a web app.");
+  .description(
+    "Config-driven simulation harness that runs AI-driven personas through a web app.",
+  );
 
 program
   .command("run")
   .description("Run discovery mode against a domain pack.")
-  .argument("<domain-pack>", "path to a .ts module exporting a DomainPack as its default export")
-  .option("-c, --config <path>", "path to a sim.config.ts module", "sim.config.ts")
-  .option("-o, --out <path>", "SQLite output file path (default: runs/<timestamp>.sqlite)")
-  .action(async (domainPackPath: string, options: { config: string; out?: string }) => {
-    try {
-      await runCommand(domainPackPath, options);
-    } catch (err) {
-      console.error(err instanceof Error ? err.message : err);
-      process.exitCode = 1;
-    }
-  });
+  .argument(
+    "<domain-pack>",
+    "path to a .ts module exporting a DomainPack as its default export",
+  )
+  .option(
+    "-c, --config <path>",
+    "path to a sim.config.ts module",
+    "sim.config.ts",
+  )
+  .option(
+    "-o, --out <path>",
+    "SQLite output file path (default: runs/<timestamp>.sqlite)",
+  )
+  .action(
+    async (
+      domainPackPath: string,
+      options: { config: string; out?: string },
+    ) => {
+      try {
+        await runCommand(domainPackPath, options);
+      } catch (err) {
+        console.error(err instanceof Error ? err.message : err);
+        process.exitCode = 1;
+      }
+    },
+  );
 
 program
   .command("analyze")
@@ -202,7 +238,11 @@ program
     "-d, --db <path>",
     "path to the run's SQLite file (the --out path from `drover run`)",
   )
-  .option("--poll-interval-ms <ms>", "Batch API polling interval in milliseconds", "5000")
+  .option(
+    "--poll-interval-ms <ms>",
+    "Batch API polling interval in milliseconds",
+    "5000",
+  )
   .option(
     "--sessions-per-chunk <n>",
     "max sessions per analyst request — splits a large run across multiple concurrent requests",
@@ -230,7 +270,10 @@ program
     "-d, --db <path>",
     "path to the run's SQLite file (the --out path from `drover run`)",
   )
-  .option("-o, --out <path>", "write the report to this file instead of printing it to stdout")
+  .option(
+    "-o, --out <path>",
+    "write the report to this file instead of printing it to stdout",
+  )
   .action(async (runId: string, options: { db: string; out?: string }) => {
     try {
       await reportCommand(runId, options);
@@ -245,7 +288,10 @@ program
   .description(
     "Replay a completed discovery run's discovered routes as scripted (non-LLM) load-test traffic.",
   )
-  .argument("<run-id>", "id of a previously completed discovery run to pull routes/target from")
+  .argument(
+    "<run-id>",
+    "id of a previously completed discovery run to pull routes/target from",
+  )
   .requiredOption(
     "-d, --db <path>",
     "path to the run's SQLite file (the --out path from `drover run`)",
