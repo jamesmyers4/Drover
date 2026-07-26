@@ -6,7 +6,7 @@ Drover is an open-source, config-driven simulation harness that runs AI-driven p
 
 Two AI tiers currently exist: an **actor** tier that drives a real browser one persona-session at a time (perceive → decide → act, LLM-reasoned), and an **analyst** tier that mines patterns across a completed run's sessions after the fact. A **fixer** tier (auto-proposing code fixes) is explicitly Phase 2 and not part of this codebase yet. See `CONTEXT.md` for the full product spec and `CLAUDE.md` for the as-built architecture map — this README is the practical entry point.
 
-**Status:** Sessions 1–7 of the build are done (types/DB, browser harness, actor tier, discovery orchestrator, analyst tier, markdown reporting, Stampede load mode). Not yet built: example domain packs and the real Horse Haven Ops pack. See `SESSION-LOG.md` for the full dated history and `GAPS.md` for known blind spots.
+**Status:** Sessions 1–8 of the build are done (types/DB, browser harness, actor tier, discovery orchestrator, analyst tier, markdown reporting, Stampede load mode, core archetypes + toy example domain pack). Not yet built: the real Horse Haven Ops pack and a validation run against Horse Haven staging. See `SESSION-LOG.md` for the full dated history and `GAPS.md` for known blind spots.
 
 ## What it does today
 
@@ -43,7 +43,24 @@ npm run lint             # biome check src tests scripts
 npm run smoke
 ```
 
-There is no example domain pack shipped yet (`examples/` is Session 8 scope), so running the real CLI end to end requires writing your own `DomainPack` and `SimConfig` first (see [Writing a domain pack](#writing-a-domain-pack) below), then:
+`examples/` ships a full end-to-end example — a toy target app plus a `DomainPack`/`SimConfig` pair that drives it — so you can see the whole pipeline run before writing your own. In one terminal:
+
+```bash
+npm run example:serve   # starts the toy app at http://127.0.0.1:4173
+```
+
+In another, with a real `ANTHROPIC_API_KEY` exported:
+
+```bash
+export ANTHROPIC_API_KEY=sk-...
+npm run drover -- run examples/toy-app/domain-pack.ts --config examples/toy-app/sim.config.ts --out runs/example1.sqlite
+npm run drover -- analyze <run-id> --db runs/example1.sqlite
+npm run drover -- report <run-id> --db runs/example1.sqlite --out runs/example1-report.md
+```
+
+The toy app has one intentional bug (a "Load more" button on `/horses` that always 500s) so the resulting report has something real to show, not just a happy path. Without a key, every session still runs through the full scheduling/budget/teardown/reconciliation pipeline and hard-stops gracefully on the missing credential — the same degrade-gracefully behavior `npm run smoke:orchestrator` relies on — so `drover run`/`drover report` are worth trying even without one.
+
+Once you're ready to point Drover at your own app, write your own `DomainPack` and `SimConfig` (see [Writing a domain pack](#writing-a-domain-pack) below — `examples/toy-app/domain-pack.ts` is a fork-friendly starting point) and swap the paths above:
 
 ```bash
 export ANTHROPIC_API_KEY=sk-...
@@ -81,7 +98,7 @@ interface WeightedGoal {
 
 `patience` and `techSavviness` are **0..1 normalized** — this is a Drover convention, not spelled out in the core type (which is a bare `number`). `patience` maps to `maxRetries = round(1 + patience*4)` and a pacing delay between actions (`pacingMs = round((1-patience)*500)`); `techSavviness` shapes how the persona is framed in the prompt. Use this scale when authoring traits, not e.g. 1–10.
 
-No core archetype set ships with the tool yet (planned: impatient/rushed, first-timer/cautious, distracted, power-user-on-mobile — Session 8/`examples/` scope) — write your own `PersonaArchetype`s per pack for now.
+A core archetype set ships with the tool itself — `examples/archetypes.ts` exports `impatientRushed`, `firstTimerCautious`, `distracted`, and `powerUserMobile` (also as `CORE_ARCHETYPES`, an array of all four). Import and reuse them in your own domain pack rather than inventing pack-specific traits from scratch — this is the actual reuse value CONTEXT.md's persona layer is for. `examples/toy-app/domain-pack.ts` shows all four wired into one pack's `goalWeightsByPersona`.
 
 **App-specific layer** (one file per target app):
 
@@ -213,9 +230,13 @@ src/
   cli/           `drover run` / `drover analyze` / `drover report` / `drover stampede` commands
   report/        Markdown findings report generation from a run's SQLite data
   stampede/      Scripted (non-LLM) load-test replay of a discovery run's discovered routes
+examples/
+  archetypes.ts  Core PersonaArchetype set shipped with the tool (see "Writing a domain pack")
+  toy-app/       A full runnable example: site-server.ts (toy target app with one
+                 intentional bug), domain-pack.ts, sim.config.ts — see Quickstart above
 ```
 
-`tests/fixtures/site.ts` is a self-contained local fixture site (nav, form, login, dashboard, console-error page, 500 endpoint) used by both tests and the smoke scripts, so nothing depends on network access or Horse Haven staging being reachable. Set `SMOKE_URL=<url>` to point smoke scripts at a real target instead.
+`tests/fixtures/site.ts` is a self-contained local fixture site (nav, form, login, dashboard, console-error page, 500 endpoint) used by both tests and the smoke scripts, so nothing depends on network access or Horse Haven staging being reachable. Set `SMOKE_URL=<url>` to point smoke scripts at a real target instead. `examples/toy-app/site-server.ts` is a separate, deliberately simpler fixture — it's part of the shipped example an adopter runs and reads, not internal test infrastructure, so it's kept independent of `tests/fixtures/site.ts` even though the pattern is identical.
 
 ## Non-goals for v1
 

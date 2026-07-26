@@ -14,14 +14,15 @@
     "typecheck": "tsc -p tsconfig.typecheck.json",
     "test": "vitest run",
     "test:watch": "vitest",
-    "lint": "biome check src tests scripts",
-    "lint:fix": "biome check --write src tests scripts",
+    "lint": "biome check src tests scripts examples",
+    "lint:fix": "biome check --write src tests scripts examples",
     "smoke": "tsx scripts/smoke.ts",
     "smoke:actor": "tsx scripts/smoke-actor.ts",
     "smoke:orchestrator": "tsx scripts/smoke-orchestrator.ts",
     "smoke:analyst": "tsx scripts/smoke-analyst.ts",
     "smoke:stampede": "tsx scripts/smoke-stampede.ts",
-    "drover": "tsx src/cli/index.ts"
+    "drover": "tsx src/cli/index.ts",
+    "example:serve": "tsx examples/toy-app/site-server.ts"
   },
   "keywords": [
     "qa",

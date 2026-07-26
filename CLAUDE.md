@@ -8,11 +8,11 @@ Also read `SESSION-LOG.md` (dated build history, session by session, with the fu
 
 ## Build status
 
-Sessions 1–7 of the original build plan are done: core types + SQLite layer, browser harness + treeLine adapter, the actor tier (LLM persona loop), the discovery-mode orchestrator, the analyst tier (cross-session pattern mining), markdown reporting, and Stampede mode (scripted load replay). See `SESSION-LOG.md` for the full dated history and decisions log, session by session.
+Sessions 1–8 of the original build plan are done: core types + SQLite layer, browser harness + treeLine adapter, the actor tier (LLM persona loop), the discovery-mode orchestrator, the analyst tier (cross-session pattern mining), markdown reporting, Stampede mode (scripted load replay), and the example domain packs + README quickstart (`examples/`). See `SESSION-LOG.md` for the full dated history and decisions log, session by session.
 
-**Next step:** Session 8 — example domain packs + README quickstart (`examples/`): a small core archetype set (impatient/rushed, first-timer/cautious, distracted, power-user-on-mobile per CONTEXT.md's persona layer) plus a toy domain pack, so someone adopting Drover has a real end-to-end example rather than having to write a `DomainPack`/`SimConfig` from scratch. Do not start Session 9.
+**Next step:** Session 9 — the real Horse Haven Ops domain pack and a validation run against Horse Haven staging. Treat CONTEXT.md's relevant sections ("Open source packaging") as the spec for that work when it's picked up. Note: a real-app validation exercise has already happened ad hoc against a local `volunteer-ops` checkout (see `KIOSK.md`, `packs/horse-haven-ops/`) — read that before starting Session 9 rather than duplicating it; it's scoped to the kiosk check-in flow only (the one route with no auth wall), not the full Horse Haven Ops domain pack CONTEXT.md describes.
 
-**Not yet built:** the example domain packs and README quickstart (`examples/`), the real Horse Haven Ops domain pack, and a validation run against Horse Haven staging. These map to the original plan's Session 8–9 scope. Treat CONTEXT.md's relevant sections ("Open source packaging") as the spec for that work when it's picked up.
+**Not yet built:** the full real Horse Haven Ops domain pack (every flow, not just kiosk check-in) and a validation run against actual Horse Haven staging (`volunteer.horsehaventn`, not the local `volunteer-ops` checkout `KIOSK.md` used). This maps to the original plan's Session 9 scope.
 
 No `ANTHROPIC_API_KEY` has been available in any build environment so far — every real-model code path (actor tier, analyst tier's Batch API) is implemented and covered by scripted/mocked tests, but has never been exercised against a live model. The smoke scripts (`npm run smoke:actor`, `smoke:orchestrator`, `smoke:analyst`) detect the missing key and skip gracefully rather than failing. Run them with a real key before trusting real-model behavior. Horse Haven staging URL/credentials are also still pending — smoke has only ever run against the local fixture site (`SMOKE_URL=<url>` points it at a real target when available); creds become truly blocking once the real Horse Haven Ops domain pack work starts.
 
@@ -87,7 +87,16 @@ src/
                    replay.ts = the scripted navigation-timing engine (no BrowserSession, no
                    action_events writes — see decisions log). run-stampede.ts = runStampede,
                    the entry point (own stampede_runs/stampede_route_results tables).
-  archetypes/       NOT YET BUILT (ships in examples/ per plan — see CONTEXT.md persona layer).
+```
+
+```
+examples/
+  archetypes.ts     Core PersonaArchetype set shipped with the tool (CONTEXT.md persona
+                     layer): impatientRushed, firstTimerCautious, distracted,
+                     powerUserMobile, plus a CORE_ARCHETYPES array of all four.
+  toy-app/          A full runnable example: site-server.ts (a small standalone target
+                     app with one intentional bug — a 500 behind /horses' "Load more"
+                     button), domain-pack.ts (reuses the core archetypes), sim.config.ts.
 ```
 
 Barrel exports: each subdirectory has an `index.ts`; `src/index.ts` re-exports the public surface.
@@ -193,6 +202,7 @@ npm run smoke:actor      # one real-model persona-session (needs ANTHROPIC_API_K
 npm run smoke:orchestrator  # full CLI subprocess run against the fixture site
 npm run smoke:analyst    # fixture run + real Batch API analyst pass (needs ANTHROPIC_API_KEY)
 npm run smoke:stampede   # fixture discovery run + real load-test replay (no credentials needed)
+npm run example:serve    # starts examples/toy-app's standalone target app on :4173
 npm run drover -- run <domain-pack> [--config sim.config.ts] [--out path]
 npm run drover -- analyze <run-id> --db <path> [--poll-interval-ms <ms>]
 npm run drover -- report <run-id> --db <path> [--out report.md]
