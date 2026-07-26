@@ -44,6 +44,31 @@ export interface DomainPackTeardownContext {
   runEndedAt: number;
 }
 
+/**
+ * Structurally mirrors `TreelineLoginCredentials` (`src/treeline/adapter.ts`)
+ * field for field, deliberately re-declared here rather than imported —
+ * `src/types/` has no dependency on any other tier (every other type file
+ * only imports from within `src/types/`), and this shape is plain data with
+ * no treeline-specific runtime behavior, so duplicating it costs nothing and
+ * keeps that layering intact.
+ *
+ * Credential *values* are the pack author's own responsibility to supply
+ * (typically `process.env.SOME_VAR!` read at module-load time inside the
+ * pack file), same precedent as `teardown`'s `HHOPS_TEST_DATABASE_URL` usage
+ * — Drover doesn't introduce a separate "env var name" indirection layer on
+ * top of what pack authors already do themselves elsewhere.
+ */
+export interface DomainPackAuthCredentials {
+  loginUrl: string;
+  username: string;
+  password: string;
+  /** Selector that must exist after login for it to count as a success. */
+  successIndicator: string;
+  usernameSelector?: string;
+  passwordSelector?: string;
+  submitSelector?: string;
+}
+
 export interface DomainPack {
   appName: string;
   personas: PersonaArchetype[];
@@ -63,4 +88,23 @@ export interface DomainPack {
    * Runs finally-style: after a completed, budget-stopped, *or* crashed run.
    */
   teardown?: (ctx: DomainPackTeardownContext) => Promise<void>;
+  /**
+   * Optional single set of login credentials, used to reach any goal behind
+   * an auth wall. Not in CONTEXT.md's verbatim schema — added once a real
+   * target (Horse Haven Ops) needed it, see GAPS.md/SESSION-LOG.md. Lives on
+   * `DomainPack`, not `SimConfig`: only `SimConfig` gets persisted into a
+   * run's stored `Run.config` snapshot (`src/types/run.ts`), so credentials
+   * placed here never enter the SQLite database at all — the same "secrets
+   * never enter [persisted state]" discipline already applied to prompt
+   * content and the event log, extended one layer further.
+   *
+   * `runDiscovery` calls `TreelineAdapter.performLogin` with this exactly
+   * once per run (not once per session — login is a real, possibly
+   * rate-limited network operation) and reuses the resulting `storageState`
+   * across every persona-session in the run. A pack with goals that don't
+   * need auth simply omits this field; a pack whose goals need *different*
+   * roles/accounts isn't supported yet by this single-credentials-per-run
+   * shape (see GAPS.md).
+   */
+  auth?: DomainPackAuthCredentials;
 }

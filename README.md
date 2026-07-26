@@ -129,12 +129,38 @@ interface DomainPack {
     runStartedAt: number;   // epoch ms
     runEndedAt: number;     // epoch ms, taken right as teardown is invoked
   }) => Promise<void>;
+  auth?: {
+    loginUrl: string;
+    username: string;
+    password: string;
+    successIndicator: string;   // selector that must exist post-login
+    usernameSelector?: string;
+    passwordSelector?: string;
+    submitSelector?: string;
+  };
 }
 ```
 
 Each persona draws from a **weighted goal pool** per session rather than one fixed flow — this is what makes a run reflect "what do real users actually do, in what proportions" instead of testing a single scripted path.
 
 `teardown` is optional and runs finally-style after a completed/budget-stopped/crashed run alike. Drover keeps no record of which app-side rows a run actually created, so correlating and deleting them is the pack author's responsibility, via one of two strategies: tag synthetic data with the `runId` at fill-time (needs nothing further from Drover), or sweep by timestamp window using `runStartedAt`/`runEndedAt` (which Drover provides precisely so this doesn't need separate SQLite access from inside the hook).
+
+### Authenticating personas
+
+`auth` is optional — omit it entirely if every goal in your pack is reachable without signing in (the toy example does this). When set, `drover run` logs in **once per run**, before any persona-session starts, via treeLine's `performLogin`, and reuses the resulting session state across every persona-session in that run. A login failure crashes the whole run immediately (same as a schedule referencing an unknown goal id) rather than letting every session individually hit the auth wall on its own.
+
+Credential *values* are your responsibility to supply — read them from an environment variable at module-load time inside your pack file, the same way `packs/horse-haven-ops/domain-pack.ts`'s `teardown` hook reads `process.env.HHOPS_TEST_DATABASE_URL`:
+
+```typescript
+auth: {
+  loginUrl: `${targetBaseUrl}/login`,
+  username: process.env.HHOPS_TEST_USERNAME!,
+  password: process.env.HHOPS_TEST_PASSWORD!,
+  successIndicator: "#dashboard-heading",
+},
+```
+
+`auth` lives on `DomainPack`, not `SimConfig` — only `SimConfig` gets persisted into a run's stored config snapshot (`Run.config` in the SQLite database), so a credential placed here never enters the database at all, the same secrets discipline already applied to prompt content and the event log. One set of credentials covers the whole run; a pack whose goals need different roles/accounts (e.g. an ADMIN-only flow and a VOLUNTEER-only flow in the same pack) isn't supported yet — see `GAPS.md`.
 
 ### Checkpoint detector DSL
 

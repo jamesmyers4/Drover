@@ -36,6 +36,14 @@
  * taken right here, since the DB row's own `endedAt` isn't written until after
  * teardown returns (reconciliation and the final status update both still
  * need to run first).
+ *
+ * Auth: an optional `DomainPack.auth` logs in exactly once per run (GAPS.md's
+ * "no SimConfig/DomainPack path calls performLogin" entry) via the treeLine
+ * adapter, and the resulting `storageState` is reused across every
+ * persona-session's `BrowserSession.open()` call in this run. A login
+ * failure crashes the whole run the same way an unknown persona/goal id
+ * does — every goal is presumably unreachable without it, so there's nothing
+ * for a per-session catch to usefully isolate.
  */
 
 import type { Browser } from "playwright";
@@ -48,7 +56,11 @@ import {
 } from "../actor/provider.js";
 import { BrowserSession, launchBrowser } from "../browser/index.js";
 import { type DroverDb, newId } from "../db/database.js";
-import { createTreelineAdapter, type TreelineAdapter } from "../treeline/adapter.js";
+import {
+  createTreelineAdapter,
+  type TreelineAdapter,
+  type TreelineStorageState,
+} from "../treeline/adapter.js";
 import type {
   CheckpointContextEntry,
   DomainPack,
@@ -157,6 +169,12 @@ export async function runDiscovery(opts: RunDiscoveryOptions): Promise<RunDiscov
   const ownsBrowser = !opts.browser;
   const browser = opts.browser ?? (await launchBrowser());
 
+  // Logged in once per run (not per session — a real login is a network
+  // operation, possibly rate-limited) and reused across every persona-session
+  // in this run. `runOneScheduledSession` below closes over this `let`, so an
+  // assignment made before the worker pool starts is visible to every worker.
+  let storageState: TreelineStorageState | undefined;
+
   let totalCostUsd = 0;
   let sessionsCompleted = 0;
   let sessionsHardStopped = 0;
@@ -197,6 +215,7 @@ export async function runDiscovery(opts: RunDiscoveryOptions): Promise<RunDiscov
         sessionId,
         db,
         deviceType: archetype.traits.deviceType,
+        ...(storageState ? { storageState } : {}),
       });
       await browserSession.navigate(
         config.targetBaseUrl,
@@ -238,6 +257,15 @@ export async function runDiscovery(opts: RunDiscoveryOptions): Promise<RunDiscov
   }
 
   try {
+    if (domainPack.auth) {
+      // A login failure here is treated the same as a schedule/config bug
+      // (below): every goal is presumably unreachable without it, so there's
+      // nothing useful a per-session catch could isolate — the whole run
+      // stops before any session opens a browser context, teardown still
+      // runs finally-style, and the run row is marked `crashed`.
+      storageState = await treelineAdapter.performLogin(browser, domainPack.auth);
+    }
+
     // A bounded worker pool over `schedule`, in schedule order: each worker
     // repeatedly claims the next unclaimed entry and runs it. `nextIndex`,
     // `stopLaunching`, and the counters above are only ever mutated in

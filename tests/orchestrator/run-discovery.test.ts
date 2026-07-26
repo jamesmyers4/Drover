@@ -2,10 +2,14 @@ import type { Browser } from "playwright";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import type { ActorDecideResult, ModelProvider } from "../../src/actor/provider.js";
 import { ScriptedModelProvider } from "../../src/actor/provider.js";
-import { launchBrowser } from "../../src/browser/index.js";
+import { BrowserSession, launchBrowser } from "../../src/browser/index.js";
 import { DroverDb } from "../../src/db/database.js";
 import { buildCheckpointContext, runDiscovery } from "../../src/orchestrator/run-discovery.js";
-import { createTreelineAdapter, type TreelineAdapter } from "../../src/treeline/adapter.js";
+import {
+  createTreelineAdapter,
+  type TreelineAdapter,
+  type TreelineStorageState,
+} from "../../src/treeline/adapter.js";
 import type { DomainPack, DomainPackTeardownContext, SimConfig } from "../../src/types/index.js";
 import { type FixtureSite, startFixtureSite } from "../fixtures/site.js";
 
@@ -425,6 +429,178 @@ describe("runDiscovery", () => {
       // The real proof of concurrency: more than one session's decide() call
       // was in flight at the same wall-clock moment.
       expect(maxActive).toBeGreaterThan(1);
+    },
+    TIMEOUT,
+  );
+
+  it(
+    "logs in once via DomainPack.auth and reuses the storageState across every session",
+    async () => {
+      db = new DroverDb(":memory:");
+      const fakeStorageState: TreelineStorageState = { cookies: [], origins: [] };
+      const performLogin = vi.fn().mockResolvedValue(fakeStorageState);
+      const authAdapter: TreelineAdapter = {
+        kind: "stub",
+        performLogin,
+        checkAuthStillValid: stubAdapter.checkAuthStillValid.bind(stubAdapter),
+        detectAuthWall: stubAdapter.detectAuthWall.bind(stubAdapter),
+        resolveSeedUrl: stubAdapter.resolveSeedUrl.bind(stubAdapter),
+      };
+      const openSpy = vi.spyOn(BrowserSession, "open");
+
+      const domainPack: DomainPack = {
+        appName: "fixture-app",
+        personas: [
+          {
+            id: "p1",
+            name: "Solo",
+            traits: {
+              patience: 0.5,
+              techSavviness: 0.5,
+              deviceType: "desktop",
+              familiarity: "new",
+            },
+          },
+        ],
+        goals: [
+          {
+            id: "reach-dashboard",
+            description: "Reach the dashboard.",
+            actionBudget: 5,
+            checkpoints: [
+              { id: "on-dashboard", description: "On the dashboard.", detector: "url:/dashboard" },
+            ],
+            successCheckpointId: "on-dashboard",
+          },
+        ],
+        goalWeightsByPersona: { p1: [{ goalId: "reach-dashboard", weight: 1 }] },
+        dataPolicy: "synthetic-only",
+        auth: {
+          loginUrl: `${site.baseUrl}/login`,
+          username: "test-user",
+          password: "test-pass",
+          successIndicator: "#dashboard-heading",
+        },
+      };
+
+      const config = baseConfig({
+        targetBaseUrl: site.baseUrl,
+        runDimensions: { orgSize: 3, simulatedWeeks: 1, sessionsPerPersonaPerWeek: 1 },
+      });
+
+      const result = await runDiscovery({
+        db,
+        domainPack,
+        config,
+        screenshotDir: "runs/screenshots-test",
+        browser,
+        treelineAdapter: authAdapter,
+        disablePacing: true,
+        providerFactory: () =>
+          new ScriptedModelProvider([
+            {
+              reasoning: "Go to the dashboard.",
+              actionType: "navigate",
+              url: `${site.baseUrl}/dashboard`,
+            },
+          ]),
+      });
+
+      expect(result.status).toBe("completed");
+      expect(result.sessionsScheduled).toBe(3);
+      // Login is a real network operation, not something to repeat per session.
+      expect(performLogin).toHaveBeenCalledTimes(1);
+      expect(performLogin).toHaveBeenCalledWith(browser, domainPack.auth);
+
+      const sessionOpenCalls = openSpy.mock.calls.filter((call) => call[1].db === db);
+      expect(sessionOpenCalls).toHaveLength(3);
+      for (const call of sessionOpenCalls) {
+        expect(call[1].storageState).toBe(fakeStorageState);
+      }
+
+      openSpy.mockRestore();
+    },
+    TIMEOUT,
+  );
+
+  it(
+    "crashes the run when DomainPack.auth login fails, and still tears down",
+    async () => {
+      db = new DroverDb(":memory:");
+      const teardownCalls: DomainPackTeardownContext[] = [];
+      const performLogin = vi.fn().mockRejectedValue(new Error("login failed: bad credentials"));
+      const authAdapter: TreelineAdapter = {
+        kind: "stub",
+        performLogin,
+        checkAuthStillValid: stubAdapter.checkAuthStillValid.bind(stubAdapter),
+        detectAuthWall: stubAdapter.detectAuthWall.bind(stubAdapter),
+        resolveSeedUrl: stubAdapter.resolveSeedUrl.bind(stubAdapter),
+      };
+      const openSpy = vi.spyOn(BrowserSession, "open");
+
+      const domainPack: DomainPack = {
+        appName: "fixture-app",
+        personas: [
+          {
+            id: "p1",
+            name: "Solo",
+            traits: {
+              patience: 0.5,
+              techSavviness: 0.5,
+              deviceType: "desktop",
+              familiarity: "new",
+            },
+          },
+        ],
+        goals: [
+          {
+            id: "reach-dashboard",
+            description: "Reach the dashboard.",
+            actionBudget: 5,
+            checkpoints: [
+              { id: "on-dashboard", description: "On the dashboard.", detector: "url:/dashboard" },
+            ],
+            successCheckpointId: "on-dashboard",
+          },
+        ],
+        goalWeightsByPersona: { p1: [{ goalId: "reach-dashboard", weight: 1 }] },
+        dataPolicy: "synthetic-only",
+        auth: {
+          loginUrl: `${site.baseUrl}/login`,
+          username: "test-user",
+          password: "wrong-pass",
+          successIndicator: "#dashboard-heading",
+        },
+        teardown: async (ctx) => {
+          teardownCalls.push(ctx);
+        },
+      };
+
+      const config = baseConfig({ targetBaseUrl: site.baseUrl });
+
+      await expect(
+        runDiscovery({
+          db,
+          domainPack,
+          config,
+          screenshotDir: "runs/screenshots-test",
+          browser,
+          treelineAdapter: authAdapter,
+          disablePacing: true,
+          providerFactory: () => new ScriptedModelProvider([]),
+        }),
+      ).rejects.toThrow(/login failed/);
+
+      expect(performLogin).toHaveBeenCalledTimes(1);
+      // No session should ever have opened a browser context for this run.
+      const sessionOpenCalls = openSpy.mock.calls.filter((call) => call[1].db === db);
+      expect(sessionOpenCalls).toHaveLength(0);
+
+      expect(teardownCalls).toHaveLength(1);
+      const crashedRun = db.getRun(teardownCalls[0]?.runId ?? "");
+      expect(crashedRun?.status).toBe("crashed");
+
+      openSpy.mockRestore();
     },
     TIMEOUT,
   );
