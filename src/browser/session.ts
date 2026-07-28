@@ -7,7 +7,13 @@
  *
  * Secrets discipline: auth state (cookies/tokens) enters via `storageState`
  * into the browser context only. Fill values are never written to the event
- * log — only the target selector is.
+ * log — only the target (an aria-ref, see below) is.
+ *
+ * `click`/`fill` accept any valid Playwright locator string, but the actor
+ * loop's only real caller (`src/actor/loop.ts`) always passes an `aria-ref=`
+ * locator built from the model's own page-snapshot ref (GAPS.md) — never a
+ * hand-written CSS selector, which the model has no reliable way to produce
+ * from a role/accessible-name-only view of the page.
  */
 
 import { type Browser, type BrowserContext, chromium, type Page } from "playwright";
@@ -23,6 +29,15 @@ export type ObservationActionType = "console-error" | "page-error" | "http-failu
 export type ActionErrorType = "action-error";
 
 const MAX_OBSERVED_TEXT = 300;
+
+/**
+ * Fail-fast timeout for `click`/`fill` when the target is an `aria-ref=`
+ * locator (see the actor tier's ref-based interaction model, GAPS.md). A ref
+ * only resolves against the exact snapshot generation it came from — a
+ * wrong/stale ref is a real bug signal now, not a CSS guess worth patiently
+ * waiting out, so it gets a short timeout instead of Playwright's 30s default.
+ */
+const REF_ACTION_TIMEOUT_MS = 5000;
 
 export interface BrowserSessionOptions {
   /** Must already exist as a sessions row (FK on action_events). */
@@ -145,7 +160,10 @@ export class BrowserSession {
 
   async click(selector: string, reasoning: string, checkpointId?: string): Promise<string> {
     return this.performAction("click", selector, reasoning, checkpointId, async () => {
-      await this.page.locator(selector).first().click();
+      const options = selector.startsWith("aria-ref=")
+        ? { timeout: REF_ACTION_TIMEOUT_MS }
+        : undefined;
+      await this.page.locator(selector).first().click(options);
       // A click's real effect can be an async client-side transition (e.g. a
       // fetch-backed Server Action redirecting via history.pushState) that
       // Playwright's click() itself never waits on, unlike a real navigation.
@@ -164,7 +182,10 @@ export class BrowserSession {
   ): Promise<string> {
     // `value` is deliberately absent from the emitted event.
     return this.performAction("fill", selector, reasoning, checkpointId, async () => {
-      await this.page.locator(selector).first().fill(value);
+      const options = selector.startsWith("aria-ref=")
+        ? { timeout: REF_ACTION_TIMEOUT_MS }
+        : undefined;
+      await this.page.locator(selector).first().fill(value, options);
     });
   }
 
@@ -172,7 +193,7 @@ export class BrowserSession {
     const timestamp = Date.now();
     const url = this.page.url();
     const title = await this.page.title();
-    const ariaSnapshot = await this.page.locator("body").ariaSnapshot();
+    const ariaSnapshot = await this.page.locator("body").ariaSnapshot({ mode: "ai" });
     const eventId = this.emit("read-page", url, reasoning, timestamp, checkpointId);
     return { url, title, ariaSnapshot, eventId };
   }

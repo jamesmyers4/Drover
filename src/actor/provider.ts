@@ -21,6 +21,7 @@ export interface ActorDecision {
   reasoning: string;
   actionType: ActorActionType;
   url?: string;
+  /** The target element's ref (e.g. "e4") from the most recent page snapshot — never a CSS selector. */
   selector?: string;
   value?: string;
   outcome?: "success" | "gave-up";
@@ -94,7 +95,8 @@ const DECIDE_TOOL: Anthropic.Tool = {
       },
       selector: {
         type: "string",
-        description: "CSS selector of the element. Required when actionType is 'click' or 'fill'.",
+        description:
+          "The element's ref exactly as shown in the page contents, e.g. \"e4\" from a line like `button \"Submit\" [ref=e4]` — never a CSS selector. Required when actionType is 'click' or 'fill'.",
       },
       value: { type: "string", description: "Text to type. Required when actionType is 'fill'." },
       outcome: {

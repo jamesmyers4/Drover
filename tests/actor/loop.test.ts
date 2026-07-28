@@ -1,4 +1,4 @@
-import type { Browser } from "playwright";
+import type { Browser, Page } from "playwright";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { SessionBudget } from "../../src/actor/budget.js";
 import { runPersonaSession } from "../../src/actor/loop.js";
@@ -17,6 +17,28 @@ import { type FixtureSite, startFixtureSite } from "../fixtures/site.js";
 const TIMEOUT = 30_000;
 
 const domainPack: Pick<DomainPack, "appName"> = { appName: "Fixture App" };
+
+/**
+ * Real click/fill decisions now carry an aria-ref (see src/actor/loop.ts),
+ * not a CSS selector — look up the current ref for an element the same way
+ * the model does, from a `body`-rooted snapshot (matching capturePerception
+ * exactly), rather than hardcoding a magic `eN` literal that's an
+ * implementation detail of Playwright's own numbering. Ref numbering is
+ * scoped to the snapshot's traversal root — an isolated per-element snapshot
+ * (e.g. `page.locator(cssSelector).ariaSnapshot()`) numbers from that
+ * element as its own root and gives a *different* ref than a body-rooted
+ * one, so this must match capturePerception's root exactly or the ref won't
+ * resolve later.
+ */
+async function refFor(page: Page, roleAndAccessibleName: string): Promise<string> {
+  const snapshot = await page.locator("body").ariaSnapshot({ mode: "ai" });
+  const escaped = roleAndAccessibleName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const match = new RegExp(`${escaped}[^[]*\\[ref=(\\w+)\\]`).exec(snapshot);
+  if (!match) {
+    throw new Error(`no ref found for "${roleAndAccessibleName}" in snapshot:\n${snapshot}`);
+  }
+  return match[1] as string;
+}
 
 function makeArchetype(overrides?: Partial<PersonaArchetype["traits"]>): PersonaArchetype {
   return {
@@ -295,7 +317,6 @@ describe("runPersonaSession", () => {
     "hard-stops after patience-bounded retries are exhausted on a persistently failing action",
     async () => {
       await setUp();
-      session.page.setDefaultTimeout(1000);
       const goal: Goal = {
         id: "impossible",
         description: "Click something that doesn't exist.",
@@ -303,14 +324,18 @@ describe("runPersonaSession", () => {
         checkpoints: [{ id: "never", description: "Never.", detector: "url:/never-reached" }],
         successCheckpointId: "never",
       };
-      // Same failing click every attempt — patience=0 bounds retries to 1 (maxRetries = round(1+0*4)).
+      // A ref that was never handed out by any real snapshot never resolves,
+      // regardless of page content — exercises the click primitive's own
+      // fail-fast timeout for a bad aria-ref (src/browser/session.ts), not
+      // Playwright's 30s default. Same failing click every attempt —
+      // patience=0 bounds retries to 1 (maxRetries = round(1+0*4)).
       const provider = new ScriptedModelProvider([
         {
           reasoning: "Click a button that isn't there.",
           actionType: "click",
-          selector: "#does-not-exist",
+          selector: "e9999",
         },
-        { reasoning: "Try again.", actionType: "click", selector: "#does-not-exist" },
+        { reasoning: "Try again.", actionType: "click", selector: "e9999" },
       ]);
 
       const result = await runPersonaSession({
@@ -428,6 +453,13 @@ describe("runPersonaSession", () => {
     "executes a fill decision end to end and records the event",
     async () => {
       await setUp();
+      // Look up the real ref the model would see in its own page snapshot —
+      // navigating the raw page directly (not through session.navigate(),
+      // which would log an extra event this test doesn't expect) before the
+      // scripted flow's own navigate re-visits the same page for real.
+      await session.page.goto(`${site.baseUrl}/signup`);
+      const nameRef = await refFor(session.page, 'textbox "Name"');
+
       const goal: Goal = {
         id: "fill-signup",
         description: "Fill out the signup form.",
@@ -444,7 +476,7 @@ describe("runPersonaSession", () => {
         {
           reasoning: "Enter my name.",
           actionType: "fill",
-          selector: "#signup-name",
+          selector: nameRef,
           value: "Jane Volunteer",
         },
       ]);
@@ -471,7 +503,7 @@ describe("runPersonaSession", () => {
       const events = db.getEventsBySession(sessionId);
       const fillEvent = events.find((e) => e.actionType === "fill");
       expect(fillEvent).toBeDefined();
-      expect(fillEvent?.target).toBe("#signup-name");
+      expect(fillEvent?.target).toBe(`aria-ref=${nameRef}`);
       // The action budget was exhausted (the goal's checkpoint is never
       // reachable), which is expected here — this test's own point is that
       // the fill primitive ran and got logged, not that the goal succeeded.

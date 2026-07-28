@@ -31,10 +31,28 @@ export interface Perception {
 export async function capturePerception(page: Page): Promise<Perception> {
   const url = page.url();
   const title = await page.title();
-  const full = await page.locator("body").ariaSnapshot();
+  // mode: "ai" annotates each element with a stable `[ref=eN]` the model can
+  // copy back verbatim for click/fill, instead of having to invent a CSS
+  // selector from a role/name-only tree it has no way to derive one from
+  // (GAPS.md — this is what the kiosk validation run's ~80% hard-stop rate
+  // traced back to). A ref only resolves against the exact snapshot
+  // generation it came from, so every caller must re-capture immediately
+  // before each decision, never reuse one from an earlier turn.
+  const full = await page.locator("body").ariaSnapshot({ mode: "ai" });
   const ariaSnapshot =
     full.length > MAX_ARIA_SNAPSHOT_CHARS ? `${full.slice(0, MAX_ARIA_SNAPSHOT_CHARS)}…` : full;
   return { url, title, ariaSnapshot };
+}
+
+/**
+ * A model can drift on the exact ref format despite instructions (e.g. echo
+ * `[ref=e4]` or `ref=e4` back verbatim instead of bare `e4`) — extract the
+ * `eN` token itself rather than trusting the string wholesale, since that's
+ * the one part of Playwright's format that's actually load-bearing.
+ */
+function normalizeRef(raw: string): string {
+  const match = /e\d+/.exec(raw);
+  return match ? match[0] : raw.trim();
 }
 
 /** patience: 0..1 — bounds how many times a failed action gets retried before hard-stopping. */
@@ -67,10 +85,13 @@ async function executeAction(
     case "navigate":
       return await session.navigate(decision.url as string, decision.reasoning);
     case "click":
-      return await session.click(decision.selector as string, decision.reasoning);
+      return await session.click(
+        `aria-ref=${normalizeRef(decision.selector as string)}`,
+        decision.reasoning,
+      );
     case "fill":
       return await session.fill(
-        decision.selector as string,
+        `aria-ref=${normalizeRef(decision.selector as string)}`,
         decision.value as string,
         decision.reasoning,
       );
@@ -208,18 +229,23 @@ export async function runPersonaSession(
       break;
     }
 
-    const perception = await capturePerception(page);
-    const userPrompt = buildActionPrompt({
-      perception,
-      recentHistory: history.slice(-HISTORY_WINDOW),
-      actionsTaken,
-      actionBudget: goal.actionBudget,
-    });
-
     let stepSucceeded = false;
     let lastErrorMessage = "";
     let attempt = 0;
     for (; attempt <= maxRetries; attempt++) {
+      // Re-perceive on every attempt, including retries — not once before
+      // the retry loop. An aria-ref is only valid against the exact snapshot
+      // generation it came from, so a retry must never act on a ref carried
+      // over from an earlier turn. This also means a retry's prompt reflects
+      // the `[error] previous attempt failed...` line just pushed to
+      // `history` below, instead of repeating the same stale context.
+      const perception = await capturePerception(page);
+      const userPrompt = buildActionPrompt({
+        perception,
+        recentHistory: history.slice(-HISTORY_WINDOW),
+        actionsTaken,
+        actionBudget: goal.actionBudget,
+      });
       try {
         const { decision, usage } = await provider.decide({ systemPrompt, userPrompt });
         budget.record(usage.costUsd);

@@ -72,6 +72,7 @@ export function buildStaticSystemPrompt(input: StaticPromptInput): string {
     `Your goal: ${goal.description}`,
     `Milestones that mark progress toward this goal (for your general sense of the journey — you do not need to name these explicitly):\n${checkpointList}`,
     "Perceive the current page, then decide on exactly one next action. Respond only through the decide_action tool — never as free text. Give one short sentence of reasoning for each action, as a real user might think to themselves, not a chain of detailed deliberation.",
+    "When the action is 'click' or 'fill', set 'selector' to that element's ref exactly as shown in the page contents below — for example, a line shown as `textbox \"Check-in code\" [ref=e4]` has ref `e4`. Copy the ref exactly; never invent a CSS selector.",
   ];
 
   if (input.routeMapContext) {
