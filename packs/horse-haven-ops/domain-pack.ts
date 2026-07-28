@@ -1,8 +1,8 @@
 import type { DomainPack } from "../../src/types/index.js";
 import { Client } from "pg";
 
-const TEST_VOLUNTEER_ID = "cms0ycipw0000e0jototftnju";
-const TEST_CHECKIN_CODE = "cms0ycipw0001e0josiu5dd8w";
+const TEST_VOLUNTEER_ID = "cms4wifg30000v8jog3yq07mp";
+const TEST_CHECKIN_CODE = "cms4wifg30001v8jod3ugj6dv";
 
 const domainPack: DomainPack = {
   appName: "Horse Haven Ops - Kiosk Check-In",
