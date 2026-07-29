@@ -1,8 +1,11 @@
 import type { DomainPack } from "../../src/types/index.js";
 import { Client } from "pg";
 
-const TEST_VOLUNTEER_ID = "cms57nsxa0000wwjockfaubgy";
-const TEST_CHECKIN_CODE = "cms57nsxa0001wwjofu4x2r16";
+// Exported (not just module-local) so scripts/preflight-hhops.ts can verify these still
+// match a live reseed of the target database before any run spends real LLM budget against
+// them — see GAPS.md's 2026-07-29 entry for the incident that made this necessary.
+export const TEST_VOLUNTEER_ID = "cms57nsxa0000wwjockfaubgy";
+export const TEST_CHECKIN_CODE = "cms57nsxa0001wwjofu4x2r16";
 
 const domainPack: DomainPack = {
   appName: "Horse Haven Ops - Kiosk Check-In",

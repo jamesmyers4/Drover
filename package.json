@@ -21,6 +21,7 @@
     "smoke:orchestrator": "tsx scripts/smoke-orchestrator.ts",
     "smoke:analyst": "tsx scripts/smoke-analyst.ts",
     "smoke:stampede": "tsx scripts/smoke-stampede.ts",
+    "preflight:hhops": "tsx scripts/preflight-hhops.ts",
     "drover": "tsx src/cli/index.ts",
     "example:serve": "tsx examples/toy-app/site-server.ts"
   },

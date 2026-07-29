@@ -103,6 +103,15 @@ Must read `postgresql://postgres:postgres@localhost:5434/volunteer_ops_drover`. 
 
 ## Phase 5 — run the pipeline
 
+**Run the preflight check first, every time** — `npm run preflight:hhops` (from the Drover repo). It verifies the app server is actually reachable and looks right, `HHOPS_TEST_DATABASE_URL` points at localhost, and `domain-pack.ts`'s `TEST_VOLUNTEER_ID`/`TEST_CHECKIN_CODE` still match a real row in the database that URL points to — exists specifically because both of those have silently gone stale before (see "What went wrong once" above, and `GAPS.md`'s 2026-07-29 entry). It exits non-zero with a specific fix-it message on the first failed check, before any run spends real LLM budget. It does **not** fully rule out a stale app-server process still bound to port 3000 from an earlier session (see the script's own header comment) — the netstat check in Phase 3 above is still the authoritative defense against that specific case; run both.
+
+```bash
+cd ~/drover
+npm run preflight:hhops
+```
+
+Once it passes:
+
 ```bash
 npm run drover -- run packs/horse-haven-ops/domain-pack.ts --config packs/horse-haven-ops/sim.config.ts --out runs/hhops-N.sqlite
 npm run drover -- analyze <run-id> --db runs/hhops-N.sqlite

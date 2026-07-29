@@ -6,7 +6,7 @@ Drover is an open-source, config-driven simulation harness that runs AI-driven p
 
 Two AI tiers currently exist: an **actor** tier that drives a real browser one persona-session at a time (perceive → decide → act, LLM-reasoned), and an **analyst** tier that mines patterns across a completed run's sessions after the fact. A **fixer** tier (auto-proposing code fixes) is explicitly Phase 2 and not part of this codebase yet. See `CONTEXT.md` for the full product spec and `CLAUDE.md` for the as-built architecture map — this README is the practical entry point.
 
-**Status:** Sessions 1–8 of the build are done (types/DB, browser harness, actor tier, discovery orchestrator, analyst tier, markdown reporting, Stampede load mode, core archetypes + toy example domain pack). Not yet built: the real Horse Haven Ops pack and a validation run against Horse Haven staging. See `SESSION-LOG.md` for the full dated history and `GAPS.md` for known blind spots.
+**Status:** Sessions 1–8 of the build are done (types/DB, browser harness, actor tier, discovery orchestrator, analyst tier, markdown reporting, Stampede load mode, core archetypes + toy example domain pack). A narrow real domain pack (`packs/horse-haven-ops/`, kiosk check-in flow only) has run multiple real discovery/analyze/report cycles against a local, disposable `volunteer-ops` checkout — real cost, real findings, not yet fully trusted (see `SESSION-10-PLAN.md` for why). Not yet built: the rest of the Horse Haven Ops pack (everything behind its Clerk auth wall) and a validation run against real Horse Haven staging. See `SESSION-LOG.md` for the full dated history, `GAPS.md` for known blind spots, and `SESSION-10-PLAN.md` for the current session-by-session roadmap.
 
 ## What it does today
 
