@@ -1,8 +1,8 @@
 import type { DomainPack } from "../../src/types/index.js";
 import { Client } from "pg";
 
-const TEST_VOLUNTEER_ID = "cms4wifg30000v8jog3yq07mp";
-const TEST_CHECKIN_CODE = "cms4wifg30001v8jod3ugj6dv";
+const TEST_VOLUNTEER_ID = "cms57nsxa0000wwjockfaubgy";
+const TEST_CHECKIN_CODE = "cms57nsxa0001wwjofu4x2r16";
 
 const domainPack: DomainPack = {
   appName: "Horse Haven Ops - Kiosk Check-In",
@@ -74,15 +74,23 @@ const domainPack: DomainPack = {
       connectionString: process.env.HHOPS_TEST_DATABASE_URL,
     });
     await client.connect();
-    const start = new Date(ctx.runStartedAt);
-    const end = new Date(ctx.runEndedAt);
+    // CheckIn.createdAt is Prisma's plain `DateTime` (Postgres "timestamp without time
+    // zone"), written by Prisma as literal UTC wall-clock digits. Binding JS `Date` objects
+    // here instead of ISO strings made node-postgres serialize them as *local* wall-clock
+    // time (this machine: America/New_York, UTC-4), so the BETWEEN window silently matched
+    // zero rows whenever the local timezone wasn't UTC — found via a real validation run.
+    // ISO strings avoid that: Postgres casts a "timestamp without time zone" input string by
+    // taking its digits literally and discarding any trailing zone/offset, matching exactly
+    // what Prisma wrote.
+    const start = new Date(ctx.runStartedAt).toISOString();
+    const end = new Date(ctx.runEndedAt).toISOString();
     const result = await client.query(
-      `DELETE FROM "CheckIn" WHERE "volunteerId" = $1 AND "createdAt" BETWEEN $2 AND $3`,
+      `DELETE FROM "CheckIn" WHERE "volunteerId" = $1 AND "createdAt" BETWEEN $2::timestamp AND $3::timestamp`,
       [TEST_VOLUNTEER_ID, start, end],
     );
     await client.end();
     console.log(
-      `[teardown] cleared ${result.rowCount} CheckIn row(s) for volunteer ${TEST_VOLUNTEER_ID} between ${start.toISOString()} and ${end.toISOString()}`,
+      `[teardown] cleared ${result.rowCount} CheckIn row(s) for volunteer ${TEST_VOLUNTEER_ID} between ${start} and ${end}`,
     );
   },
 };
