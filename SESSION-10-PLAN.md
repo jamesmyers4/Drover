@@ -89,6 +89,8 @@ Suggested approach (use judgment — this is the outcome that matters, not the e
 
 **Cost: ~$0.20 (one fresh discovery run) + ~$0.03 (analyzing the orphaned run 2).** Depends on Session 1 existing (run its preflight first) but can proceed without it if the user says to skip Session 1 — just be extra careful re-verifying credentials/port by hand per `ENVIRONMENT.md` if so.
 
+**Status: done, 2026-07-29 — not yet committed, review the diff and `runs/hhops-4-report.md` / `runs/hhops-drover-container-2-report.md`.** Full results and updated read on runs 1–3 are in `GAPS.md`'s 2026-07-29 "Update" entry — condensed: a clean single-boot run (`hhops-4`) came back with zero findings at all, which rules out a standing pipeline/pack bug; the previously-orphaned run 2 turned out to have one real `net::ERR_ABORTED` finding (1/24 sessions), not zero. Run 1's total (16/16) failure is now best explained by the already-documented EADDRINUSE incident (wrong server, not stale credentials — run 2/3 used the same credentials and mostly succeeded, which rules that theory out). The recurring `net::ERR_ABORTED` noise across runs 1/2/3 but not run 4 is still a genuinely open question, not resolved either way — flagged for Sessions 3/4 to watch for.
+
 **Goal**: get one trustworthy kiosk-flow report, and stop leaving run 2's data un-reviewed.
 
 1. Stand up the dedicated container fresh (`ENVIRONMENT.md` Phases 0–4), run the Session 1 preflight (or the manual checks if Session 1 wasn't done), then run the existing pipeline unchanged: `drover run` → `drover analyze` → `drover report` against `packs/horse-haven-ops/domain-pack.ts` + `sim.config.ts`, output to `runs/hhops-4.sqlite`.
