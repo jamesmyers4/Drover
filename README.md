@@ -138,6 +138,8 @@ interface DomainPack {
     passwordSelector?: string;
     submitSelector?: string;
   };
+  // Mutually exclusive with `auth` — see "When auth's generic form-fill shape doesn't fit" below.
+  customLogin?: (browser: Browser, targetBaseUrl: string) => Promise<DomainPackStorageState>;
 }
 ```
 
@@ -161,6 +163,8 @@ auth: {
 ```
 
 `auth` lives on `DomainPack`, not `SimConfig` — only `SimConfig` gets persisted into a run's stored config snapshot (`Run.config` in the SQLite database), so a credential placed here never enters the database at all, the same secrets discipline already applied to prompt content and the event log. One set of credentials covers the whole run; a pack whose goals need different roles/accounts (e.g. an ADMIN-only flow and a VOLUNTEER-only flow in the same pack) isn't supported yet — see `GAPS.md`.
+
+**When `auth`'s generic form-fill shape doesn't fit** — some apps' real login isn't a conventional same-origin username/password form Playwright can drive with CSS selectors (e.g. an identity provider with no password strategy at all, authenticated instead via a provider-specific testing SDK). For that case, `DomainPack.customLogin?: (browser: Browser, targetBaseUrl: string) => Promise<DomainPackStorageState>` is a mutually-exclusive alternative — supply your own async login function instead of `auth`; Drover calls it with the same once-per-run timing and failure-handling contract (a failure crashes the whole run, teardown still runs). Declaring both `auth` and `customLogin` throws `ConflictingAuthConfigError` before the run starts. `packs/horse-haven-ops/domain-pack.ts` is a real example — Horse Haven Ops uses Clerk with password sign-in disabled, authenticated via `@clerk/testing`'s testing-token mechanism instead.
 
 ### Checkpoint detector DSL
 

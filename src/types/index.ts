@@ -9,6 +9,7 @@ export type {
   Checkpoint,
   DomainPack,
   DomainPackAuthCredentials,
+  DomainPackStorageState,
   DomainPackTeardownContext,
   Goal,
 } from "./domain-pack.js";

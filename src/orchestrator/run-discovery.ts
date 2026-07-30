@@ -43,7 +43,11 @@
  * persona-session's `BrowserSession.open()` call in this run. A login
  * failure crashes the whole run the same way an unknown persona/goal id
  * does — every goal is presumably unreachable without it, so there's nothing
- * for a per-session catch to usefully isolate.
+ * for a per-session catch to usefully isolate. `DomainPack.customLogin` is a
+ * mutually-exclusive alternative for apps whose login can't be driven by
+ * `auth`'s generic form-fill shape (e.g. Horse Haven Ops' Clerk-based,
+ * password-free sign-in) — same once-per-run timing and failure handling,
+ * just a pack-supplied function instead of the treeLine adapter.
  */
 
 import type { Browser } from "playwright";
@@ -123,6 +127,29 @@ function assertConcurrencyCapValid(concurrencyCap: number | undefined): void {
 }
 
 /**
+ * `DomainPack.auth` and `DomainPack.customLogin` are two different login
+ * mechanisms for the same purpose (see `customLogin`'s doc comment in
+ * src/types/domain-pack.ts) — there's no sensible precedence rule to guess
+ * at if a pack declares both, so it's rejected up front rather than silently
+ * picking one.
+ */
+export class ConflictingAuthConfigError extends Error {
+  constructor() {
+    super(
+      "DomainPack declares both `auth` and `customLogin` — these are two alternative login " +
+        "mechanisms for the same purpose. Set at most one.",
+    );
+    this.name = "ConflictingAuthConfigError";
+  }
+}
+
+function assertAuthConfigValid(domainPack: DomainPack): void {
+  if (domainPack.auth && domainPack.customLogin) {
+    throw new ConflictingAuthConfigError();
+  }
+}
+
+/**
  * Snapshots every checkpoint id's originating goal + description from the
  * domain pack, so the analyst tier (`src/analyst/prompt.ts`) can show
  * something more useful than a bare checkpoint id string (GAPS.md). Taken at
@@ -146,6 +173,7 @@ export async function runDiscovery(opts: RunDiscoveryOptions): Promise<RunDiscov
   // Enforced once at config-load time, not per-session (SESSION-LOG.md's Session 3 note for Session 4).
   assertDataPolicyAllowed(domainPack.dataPolicy, config.modelRouting.actor);
   assertConcurrencyCapValid(config.concurrencyCap);
+  assertAuthConfigValid(domainPack);
   const concurrencyCap = config.concurrencyCap ?? 1;
 
   const goalsById = new Map(domainPack.goals.map((g) => [g.id, g]));
@@ -257,7 +285,11 @@ export async function runDiscovery(opts: RunDiscoveryOptions): Promise<RunDiscov
   }
 
   try {
-    if (domainPack.auth) {
+    if (domainPack.customLogin) {
+      // Same failure-handling contract as the `auth` branch below — a login
+      // failure here crashes the whole run, not just one session.
+      storageState = await domainPack.customLogin(browser, config.targetBaseUrl);
+    } else if (domainPack.auth) {
       // A login failure here is treated the same as a schedule/config bug
       // (below): every goal is presumably unreachable without it, so there's
       // nothing useful a per-session catch could isolate — the whole run

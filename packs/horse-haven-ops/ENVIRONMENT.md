@@ -4,14 +4,13 @@ Replaces `KIOSK.md` (repo root, now deleted), which described the same setup bef
 
 ## What this is
 
-A guide for standing up a local, throwaway environment for `volunteer-ops` (Horse Haven Ops) and running a real Drover discovery run against it. Proven working 2026-07-28: 24/24 sessions completed, 0 hard-stops, real `CheckIn` rows created, toggled, and correctly torn down (see `GAPS.md`'s 2026-07-28 aria-ref entry and `SESSION-LOG.md`'s matching entry for the fix that got sessions completing at all; see `GAPS.md`'s 2026-07-28 (2)/(3) entries for the dedicated-container migration and a teardown timezone bug found while validating it).
+A guide for standing up a local, throwaway environment for `volunteer-ops` (Horse Haven Ops) and running a real Drover discovery run against it. Proven working 2026-07-28: 24/24 sessions completed, 0 hard-stops, real `CheckIn` rows created, toggled, and correctly torn down (see `GAPS.md`'s 2026-07-28 aria-ref entry and `SESSION-LOG.md`'s matching entry for the fix that got sessions completing at all; see `GAPS.md`'s 2026-07-28 (2)/(3) entries for the dedicated-container migration and a teardown timezone bug found while validating it). Extended 2026-07-29/30 (Session 3, `SESSION-10-PLAN.md`) past `/kiosk` to real Clerk-authenticated flows (`/dashboard`, `/animals`, `/feed-board`) via `DomainPack.customLogin` — proven working with a small 4-session smoke run, not yet exercised at the full `sim.config.ts` scale.
 
-## Why this is scoped to the kiosk flow specifically
+## Two identities, two auth mechanisms
 
-Two things remain true about the current state of both repos:
+`/kiosk` needs no login at all (`src/app/kiosk/page.tsx`'s own comment: "Deliberately no `requireVolunteer()` — this page is meant for a shared, unauthenticated tablet at the barn," identified purely by a `checkInCode` string). Every other route in this app (`/dashboard`, `/animals`, `/feed-board`, `/admin`, ...) requires real Clerk sign-in via `requireVolunteer()` — and Clerk here has no password strategy at all (`skipPasswordRequirement: true`), signed in instead via `@clerk/testing`'s testing-token mechanism, the same one this app's own Playwright E2E suite uses (`tests/e2e/fixtures.ts`). `DomainPack.auth`'s generic loginUrl/username/password/CSS-selector shape has no login form to target for that second mechanism at all — Drover's `domain-pack.ts` uses `DomainPack.customLogin` for it instead (`src/types/domain-pack.ts`; see `GAPS.md`'s 2026-07-29 customLogin entry for the full story, including a real Clerk-integration bug found and fixed while first getting this to work).
 
-1. **`packs/horse-haven-ops/domain-pack.ts` only covers `/kiosk`.** `DomainPack.auth` exists and is wired (`GAPS.md`'s 2026-07-26 login/storageState entry), so nothing _technically_ blocks extending to `/dashboard`, `/animals`, `/feed-board` anymore — but the pack itself hasn't been extended with real goals/checkpoints for them yet. That's the remaining Session 9 work.
-2. **`/kiosk` is still the one route with no auth wall.** `src/app/kiosk/page.tsx`'s own comment: "Deliberately no `requireVolunteer()` — this page is meant for a shared, unauthenticated tablet at the barn." Identified purely by a `checkInCode` string, looked up in `src/lib/checkin.ts`'s `performKioskToggle`.
+This means two separate test volunteers get seeded (Phase 2 below), not one.
 
 ## Non-negotiable safety rule
 
@@ -53,9 +52,11 @@ npm run drover:db:seed
 
 Verify the seed landed — expect `WorkType` to include a row named `"Regular Shift"` with `active: true`, at least one `ShiftTemplate`, and a `FarmSettings` singleton. `performKioskToggle` needs all three.
 
-## Phase 2 — create the dedicated test volunteer
+## Phase 2 — create the dedicated test volunteers
 
-Use the real, committed script — not an ad hoc one-liner:
+Two separate identities, one per auth mechanism (see above). Both scripts are real, committed — not ad hoc one-liners.
+
+**2a — the Clerk-free kiosk volunteer:**
 
 ```bash
 npm run drover:seed-volunteer
@@ -63,7 +64,17 @@ npm run drover:seed-volunteer
 
 (`scripts/seed-drover-test-volunteer.ts` — idempotent, finds-or-creates by name, loads `.env.drover` explicitly, and refuses to run unless `DATABASE_URL` contains `localhost`. Never reuses `tests/e2e/test-users.ts`'s shared `TEST_USERS` — those get wiped by `resetTransactionalData()` if the E2E suite ever runs against the *other* container.)
 
-Record the printed `id` and `checkInCode` — they go into `packs/horse-haven-ops/domain-pack.ts`'s `TEST_VOLUNTEER_ID`/`TEST_CHECKIN_CODE` constants in the Drover repo (already set from the 2026-07-28 dedicated-container run; only needs updating if the container gets wiped and reseeded — the ids change every time, since the seed script's find-or-create is keyed by name, not a fixed id).
+Record the printed `id` and `checkInCode` — they go into `packs/horse-haven-ops/domain-pack.ts`'s `TEST_VOLUNTEER_ID`/`TEST_CHECKIN_CODE` constants in the Drover repo. **These need updating every time the container gets wiped and reseeded** — the ids change every time, since the seed script's find-or-create is keyed by name, not a fixed id. Forgetting this step is a real, already-logged incident (`GAPS.md`'s 2026-07-29 stale-credential entry) — `npm run preflight:hhops` (Phase 5) now catches it before any run spends LLM budget, but updating the constants here is still a manual step.
+
+**2b — the Clerk-authenticated volunteer (Session 3, for `/dashboard`/`/animals`/`/feed-board`):**
+
+```bash
+npm run drover:seed-clerk-volunteer
+```
+
+(`scripts/seed-drover-test-clerk-volunteer.ts` — finds-or-creates a real Clerk user by a fixed email, `drover-authtest@volunteer-ops.example.com`, then upserts a matching `Volunteer` row keyed by `clerkId`. Needs `CLERK_SECRET_KEY` from `.env`, loaded alongside `.env.drover`.) Unlike 2a, **the printed email does not need updating on every reseed** — the Clerk user lives in Clerk's real hosted instance, not the disposable local Postgres container, so find-or-create-by-email locates the same Clerk user every time; only the local `Volunteer` row backing it gets recreated. It should already match `HHOPS_CLERK_TEST_EMAIL` in the Drover repo's `.env` — only update that if you deliberately change the email in the script.
+
+The Drover repo's own `.env` also needs `HHOPS_CLERK_SECRET_KEY` and `HHOPS_CLERK_PUBLISHABLE_KEY` set — copy the values from `volunteer-ops/.env`'s `CLERK_SECRET_KEY`/`NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` (same dev/test Clerk instance the app itself runs against; this is the one place in this whole setup where Drover's "fully local, disposable" test environment depends on a real external hosted service, since Clerk test-user auth genuinely calls Clerk's real backend API — not a hypothetical risk to flag, just worth knowing this one piece isn't torn-down-and-forgotten the way the Postgres container is).
 
 ## Phase 3 — boot the app against the test DB
 
@@ -133,4 +144,4 @@ Stop the app server. Nothing here touches the real Neon database, any real volun
 
 ## Out of scope, flagged for later
 
-Everything behind `requireVolunteer()` — dashboard, animals, feed board, training, admin — stays untested by this run. `DomainPack.auth` is wired (`GAPS.md`, 2026-07-26) but `packs/horse-haven-ops/domain-pack.ts` hasn't been extended with real goals/checkpoints for any of those routes yet. That's the actual remaining Session 9 scope, separate from the dedicated-container work `GAPS.md`'s 2026-07-28 entries closed.
+As of Session 3, `/dashboard`, `/animals`, and `/feed-board` are covered (goals `view-dashboard`, `browse-animals`, `check-feed-board` in `domain-pack.ts`), authenticated as a single `VOLUNTEER`-role identity. Still untested: `/training`, `/admin`, `/events`, `/checkin` (the volunteer's own self-service check-in, distinct from `/kiosk`), and anything requiring an `ADMIN`/`SHIFT_LEAD`-specific role — the single-`customLogin`-per-run shape (mirroring `auth`'s existing one-credential-per-run limitation, see `src/types/domain-pack.ts`) can't express a pack whose different goals need different roles yet. Extending further is straightforward goal-writing now that both auth mechanisms are wired; a second role would need real design work first.

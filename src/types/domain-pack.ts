@@ -3,6 +3,7 @@
  * Shapes are defined verbatim in CONTEXT.md ("Persona & domain pack schema").
  */
 
+import type { Browser } from "playwright";
 import type { PersonaArchetype, WeightedGoal } from "./persona.js";
 
 export interface Goal {
@@ -69,6 +70,32 @@ export interface DomainPackAuthCredentials {
   submitSelector?: string;
 }
 
+/**
+ * Structurally mirrors `TreelineStorageState` (`src/treeline/adapter.ts`) and,
+ * one layer further down, Playwright's own `BrowserContext.storageState()`
+ * return shape — deliberately re-declared rather than imported, same
+ * "src/types/ has no dependency on any other Drover tier" reasoning as
+ * `DomainPackAuthCredentials` above. `customLogin` implementations can return
+ * the real `await context.storageState()` value directly; it's assignable
+ * here by structure, no conversion needed.
+ */
+export interface DomainPackStorageState {
+  cookies: Array<{
+    name: string;
+    value: string;
+    domain: string;
+    path: string;
+    expires: number;
+    httpOnly: boolean;
+    secure: boolean;
+    sameSite: "Strict" | "Lax" | "None";
+  }>;
+  origins: Array<{
+    origin: string;
+    localStorage: Array<{ name: string; value: string }>;
+  }>;
+}
+
 export interface DomainPack {
   appName: string;
   personas: PersonaArchetype[];
@@ -107,4 +134,26 @@ export interface DomainPack {
    * shape (see GAPS.md).
    */
   auth?: DomainPackAuthCredentials;
+  /**
+   * Escape hatch alongside `auth`, for apps whose login can't be driven by a
+   * generic loginUrl/username/password/CSS-selector form — the concrete case
+   * that forced this: Horse Haven Ops uses Clerk with password sign-in
+   * disabled entirely (`skipPasswordRequirement: true` on every test
+   * account), authenticated instead via `@clerk/testing`'s testing-token
+   * mechanism (`clerk.signIn({ page, emailAddress })`), which has no login
+   * form for `DomainPackAuthCredentials`' selectors to target at all. A pack
+   * author supplies their own async login function instead; Drover calls it
+   * exactly once per run (same timing/reuse contract `auth` already has —
+   * see below) and threads the returned storageState into every session the
+   * same way. Mutually exclusive with `auth` — a pack setting both is a
+   * config error (`ConflictingAuthConfigError`, checked before the run
+   * starts), since there's no sensible precedence rule to guess at for two
+   * different login mechanisms declared on the same pack.
+   *
+   * Receives the run's `targetBaseUrl` (from `SimConfig`, not duplicated
+   * into the pack itself) so the implementation doesn't need its own
+   * hardcoded copy of a value the orchestrator already has in scope at the
+   * one call site.
+   */
+  customLogin?: (browser: Browser, targetBaseUrl: string) => Promise<DomainPackStorageState>;
 }
