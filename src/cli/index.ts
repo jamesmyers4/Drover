@@ -13,7 +13,8 @@ import path from "node:path";
 import { Command } from "commander";
 import { DEFAULT_SESSIONS_PER_CHUNK, runAnalyst } from "../analyst/analyze.js";
 import { DroverDb } from "../db/database.js";
-import { validateGraderPack } from "../grader/pack-validation.js";
+import { GraderDb } from "../grader/db.js";
+import { runGradingRun } from "../grader/scheduler.js";
 import type { GraderPack } from "../grader/types.js";
 import { loadDefaultExport } from "../orchestrator/config-loader.js";
 import { runDiscovery } from "../orchestrator/run-discovery.js";
@@ -180,40 +181,62 @@ async function stampedeCommand(
 }
 
 /**
- * `drover grade <pack> [--db path]` (FUTUREPLAN.md Grader Session 2). Loads
- * and statically validates a GraderPack — every Case.rubric key resolves,
- * layers is a well-formed sparse map, any declared prerequisite DAG
- * resolves without a cycle — before anything would spend real work
- * dispatching Tasks against it. `--db` is accepted now for forward
- * compatibility with the scheduler (Session 3+) but isn't opened or written
- * to yet; no Tasks dispatch in this session.
+ * `drover grade <pack> [--db path]` (FUTUREPLAN.md Grader Session 2, wired
+ * for real in Session 3). `runGradingRun` (`scheduler.ts`) validates the
+ * pack internally — before anything would spend real work dispatching
+ * Tasks against it, and before any `grading_runs` row is inserted, so a
+ * malformed pack never leaves a "crashed" row behind for a grading run that
+ * never actually started. There's no separate pre-validation call here
+ * (Session 3 used to have one): a second call would mean calling
+ * `pack.loadCases()` twice, which `validateGraderPack`'s doc comment
+ * explains is a real correctness risk for a stateful adapter, not just
+ * redundant work.
  *
- * Forward note for whoever wires `--db` for real: `validateGraderPack` must
- * keep resolving (this function's current call order already guarantees
- * that — nothing below it opens `GraderDb`) before any `grading_runs` row
- * gets inserted. A malformed pack should never leave a "crashed"
- * `grading_runs` row behind for something that never actually started
- * grading anything — that's a confusing thing to find while triaging real
- * runs later.
+ * `--db` always resolves to a real path — defaulting to a single, stable
+ * `grader.sqlite` in the current directory (Q6's own naming) when omitted,
+ * *not* a fresh timestamped file per invocation the way `runCommand`'s
+ * `--out` defaults for `drover run`. That precedent doesn't actually
+ * transfer: `--out`'s default names a *report* artifact, which correctly
+ * wants a unique path per run, but here it would be naming the *database*
+ * itself, and `grading_runs` is meant to accumulate history the way
+ * `Session 6`'s report and the deferred Layer 8 both depend on being able
+ * to read (compare this run against prior ones). A fresh file per
+ * invocation would make that structurally impossible by default — and this
+ * isn't hypothetical: Drover's own `runs/` directory already shows the
+ * failure mode for real (`hhops-drover-container-1/2/3.sqlite`, three
+ * separate files from three real runs of the same domain pack, so
+ * cross-run reconciliation between them never actually ran, since
+ * `reconcile.ts`'s "prior runs" query only ever sees rows in the file
+ * that's actually open). A bare `drover grade <pack>` therefore reuses the
+ * same file across invocations by default — real accumulated history,
+ * not scattered timestamped snapshots — with `--db` reserved for a
+ * deliberate override (a scratch run, a CI-specific path). Either way,
+ * there's no "validate-only, nothing persisted" mode to silently fall into
+ * by forgetting a flag.
  */
 async function gradeCommand(packPath: string, options: { db?: string }): Promise<void> {
   await registerTsLoader();
 
   const pack = await loadDefaultExport<GraderPack>(packPath, "GraderPack");
+  const dbPath = options.db ?? "grader.sqlite";
+  mkdirSync(path.dirname(dbPath) || ".", { recursive: true });
 
-  console.log(`Validating GraderPack "${pack.appName}"`);
-  await validateGraderPack(pack);
-
-  console.log(`GraderPack "${pack.appName}" is valid.`);
-  console.log(`  rubrics:               ${Object.keys(pack.rubrics).join(", ") || "(none)"}`);
+  console.log(`Grading "${pack.appName}"`);
   console.log(`  dataPolicy:            ${pack.dataPolicy}`);
   console.log(`  allowHostedEscalation: ${pack.allowHostedEscalation ?? false}`);
-  if (options.db) {
-    console.log(`  db:                    ${options.db} (not yet used by this session)`);
+  console.log(`  db:                    ${dbPath}\n`);
+
+  const db = new GraderDb(dbPath);
+  try {
+    const result = await runGradingRun({ db, pack });
+    console.log(`Grading run ${result.gradingRunId}: ${result.status}`);
+    console.log(`  cases processed: ${result.casesProcessed}`);
+    console.log(`  tasks passed:    ${result.tasksPassed}`);
+    console.log(`  tasks failed:    ${result.tasksFailed}`);
+    console.log(`  tasks skipped:   ${result.tasksSkipped}`);
+  } finally {
+    db.close();
   }
-  console.log(
-    "No Tasks dispatched — the grading engine (scheduler + layers) lands in a later session.",
-  );
 }
 
 const program = new Command();
@@ -321,10 +344,13 @@ program
 program
   .command("grade")
   .description(
-    "Validate a GraderPack (Grader — a separate subsystem, see CONTEXT.md's Glossary). Does not yet dispatch any Tasks.",
+    "Validate and dispatch a Grading Run for a GraderPack (Grader — a separate subsystem, see CONTEXT.md's Glossary).",
   )
   .argument("<pack>", "path to a .ts module exporting a GraderPack as its default export")
-  .option("-d, --db <path>", "path to a grader.sqlite output file (not yet used)")
+  .option(
+    "-d, --db <path>",
+    "grader.sqlite output file path — reused across invocations by default (default: ./grader.sqlite); pass a different path for a scratch run or CI-specific output",
+  )
   .action(async (packPath: string, options: { db?: string }) => {
     try {
       await gradeCommand(packPath, options);

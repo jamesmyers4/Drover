@@ -284,22 +284,12 @@ function validateRubrics(pack: GraderPack, issues: GraderPackValidationIssue[]):
   }
 }
 
-/** Loads the pack's Cases and checks every `Case.rubric` key resolves against `GraderPack.rubrics`. */
-async function validateCaseRubrics(
+/** Checks every `Case.rubric` key on an already-loaded Case list resolves against `GraderPack.rubrics`. */
+function validateCaseRubrics(
+  cases: CaseInput[],
   pack: GraderPack,
   issues: GraderPackValidationIssue[],
-): Promise<void> {
-  let cases: CaseInput[];
-  try {
-    cases = await pack.loadCases();
-  } catch (err) {
-    issues.push({
-      code: "cases-load-failed",
-      message: `pack.loadCases() threw: ${err instanceof Error ? err.message : String(err)}`,
-    });
-    return;
-  }
-
+): void {
   const knownRubricKeys = new Set(Object.keys(pack.rubrics ?? {}));
   const unknownRubricKeys = new Set<string>();
   for (const c of cases) {
@@ -316,11 +306,21 @@ async function validateCaseRubrics(
 }
 
 /**
- * Validates a `GraderPack` before any real work runs against it. Throws
- * `GraderPackValidationError` (carrying every issue found, not just the
- * first) if the pack is invalid; resolves silently otherwise.
+ * Validates a `GraderPack` before any real work runs against it, and
+ * returns the Cases loaded along the way. `pack.loadCases()` is called
+ * exactly once, here — a caller that goes on to actually grade
+ * (`runGradingRun`, Grader Session 3) reuses this same returned list rather
+ * than calling `loadCases()` a second time itself. That matters for any
+ * real adapter with side effects (a live DB query, a paginated API call,
+ * anything non-deterministic): two separate calls could silently disagree
+ * on which Cases exist, meaning validation would have checked a different
+ * set than what actually got graded.
+ *
+ * Throws `GraderPackValidationError` (carrying every issue found, not just
+ * the first) if the pack is invalid; resolves with the loaded Cases
+ * otherwise.
  */
-export async function validateGraderPack(pack: GraderPack): Promise<void> {
+export async function validateGraderPack(pack: GraderPack): Promise<CaseInput[]> {
   const issues: GraderPackValidationIssue[] = [];
 
   validateLayers(pack.layers, issues);
@@ -328,9 +328,24 @@ export async function validateGraderPack(pack: GraderPack): Promise<void> {
     detectPrerequisiteCycle(pack.layers, issues);
   }
   validateRubrics(pack, issues);
-  await validateCaseRubrics(pack, issues);
+
+  let cases: CaseInput[] = [];
+  let casesLoaded = true;
+  try {
+    cases = await pack.loadCases();
+  } catch (err) {
+    casesLoaded = false;
+    issues.push({
+      code: "cases-load-failed",
+      message: `pack.loadCases() threw: ${err instanceof Error ? err.message : String(err)}`,
+    });
+  }
+  if (casesLoaded) {
+    validateCaseRubrics(cases, pack, issues);
+  }
 
   if (issues.length > 0) {
     throw new GraderPackValidationError(issues);
   }
+  return cases;
 }

@@ -30,8 +30,10 @@ async function expectIssueCodes(pack: GraderPack, expectedCodes: string[]): Prom
 }
 
 describe("validateGraderPack", () => {
-  it("passes a well-formed pack with no layers override", async () => {
-    await expect(validateGraderPack(makeValidPack())).resolves.toBeUndefined();
+  it("passes a well-formed pack with no layers override, and returns the loaded Cases", async () => {
+    await expect(validateGraderPack(makeValidPack())).resolves.toEqual([
+      { input: { prompt: "hi" }, output: { text: "hello!" }, rubric: "tone-eval" },
+    ]);
   });
 
   it("passes a well-formed pack with a valid, acyclic prerequisite declaration", async () => {
@@ -48,7 +50,7 @@ describe("validateGraderPack", () => {
         },
       },
     });
-    await expect(validateGraderPack(pack)).resolves.toBeUndefined();
+    await expect(validateGraderPack(pack)).resolves.toEqual(expect.any(Array));
   });
 
   it("fails with unknown-rubric when a Case references a rubric key not declared in GraderPack.rubrics (typo)", async () => {
@@ -190,7 +192,7 @@ describe("validateGraderPack", () => {
         },
       },
     });
-    await expect(validateGraderPack(pack)).resolves.toBeUndefined();
+    await expect(validateGraderPack(pack)).resolves.toEqual(expect.any(Array));
   });
 
   it("fails with malformed-rubric when a numeric Check is missing numericTolerance", async () => {
