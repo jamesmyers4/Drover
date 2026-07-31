@@ -9,11 +9,9 @@
  *   match_key, so "open for N runs" is a count on existing data.
  */
 
-export interface Migration {
-  version: number;
-  name: string;
-  sql: string;
-}
+import type { Migration } from "./sqlite-store.js";
+
+export type { Migration };
 
 export const migrations: Migration[] = [
   {

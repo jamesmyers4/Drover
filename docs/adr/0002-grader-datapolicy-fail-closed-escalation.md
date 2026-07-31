@@ -1,0 +1,11 @@
+# GraderPack's `restricted` is local-only by default; hosted escalation is a separate, fail-closed flag
+
+**Status:** accepted
+
+`DomainPack.dataPolicy: "restricted"` bundles two permissions into one value: local-only, *or* Anthropic as an accepted exception. That bundling is reasonable for the actor tier (a human is typically attentive to a session; the Anthropic exception is a known default). It's wrong for Grader: Cases are graded in unattended batches, often overnight, specifically because local models make that cheap — a `dataPolicy` misconfiguration there doesn't leak one session's content, it leaks however many hundreds of Cases were in that run before anyone notices. Grader's blast radius is categorically larger, so its default posture needs to fail closed, not match the actor tier's.
+
+Decided: `GraderPack.dataPolicy` keeps the same two values (`synthetic-only` | `restricted`) for vocabulary parity, but `restricted` now means **local-only, full stop** — no bundled hosted-provider exception. A second, orthogonal field, `allowHostedEscalation?: boolean` (default `false`), must be explicitly set `true` before any Task may dispatch to a hosted judge (Anthropic). This makes the hosted-escalation path a separately-visible decision in the pack source, not a fact a pack author has to already know is implied by `restricted`.
+
+Enforcement happens **per Task dispatch**, not once at Grading Run initialization. A Consensus Round's escalation (Question 5's tie-breaker mechanism) dispatches a new Task dynamically, mid-run, in response to runtime disagreement — a startup-only check would never see that path exercised and could be silently routed around three layers and forty Cases into an unattended run. Per-dispatch enforcement is what makes the escalation mechanism safe to have at all, not just a correctness nicety.
+
+**Deferred, not solved here:** `dataPolicy`/`allowHostedEscalation` govern which model *sees* Case content mid-grading. They say nothing about whether `grader.sqlite` itself (which persists Case content for auditability, per the Question 8 rubric-snapshot decision) needs handling as sensitive data at rest — encryption, exclusion from cloud-synced folders, `.gitignore` treatment. Open question for a future session.

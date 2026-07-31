@@ -4,7 +4,6 @@
  */
 
 import { randomUUID } from "node:crypto";
-import Database from "better-sqlite3";
 import type {
   ActionEvent,
   CheckpointContextEntry,
@@ -18,6 +17,7 @@ import type {
   StampedeRun,
 } from "../types/index.js";
 import { migrations } from "./migrations.js";
+import { SqliteStore } from "./sqlite-store.js";
 
 export function newId(): string {
   return randomUUID();
@@ -28,40 +28,10 @@ export interface StoredActionEvent extends ActionEvent {
   id: string;
 }
 
-export class DroverDb {
-  private readonly db: Database.Database;
-
+export class DroverDb extends SqliteStore {
   /** @param path SQLite file path, or ":memory:" for tests. */
   constructor(path: string) {
-    this.db = new Database(path);
-    this.db.pragma("journal_mode = WAL");
-    this.db.pragma("foreign_keys = ON");
-    this.migrate();
-  }
-
-  private migrate(): void {
-    this.db.exec(
-      "CREATE TABLE IF NOT EXISTS schema_migrations (version INTEGER PRIMARY KEY, name TEXT NOT NULL, applied_at INTEGER NOT NULL)",
-    );
-    const applied = new Set(
-      this.db
-        .prepare("SELECT version FROM schema_migrations")
-        .all()
-        .map((r) => (r as { version: number }).version),
-    );
-    for (const m of migrations) {
-      if (applied.has(m.version)) continue;
-      this.db.transaction(() => {
-        this.db.exec(m.sql);
-        this.db
-          .prepare("INSERT INTO schema_migrations (version, name, applied_at) VALUES (?, ?, ?)")
-          .run(m.version, m.name, Date.now());
-      })();
-    }
-  }
-
-  close(): void {
-    this.db.close();
+    super(path, migrations);
   }
 
   // --- runs ---
