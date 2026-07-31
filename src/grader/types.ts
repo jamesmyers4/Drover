@@ -18,15 +18,28 @@ export type CheckScoringType = "boolean" | "numeric";
  * One named, independently-scored criterion inside a rubric. Carries its own
  * agreement rule (exact-match for boolean, numeric tolerance for scored) —
  * per the Consensus Round glossary entry, a tolerance rule is meaningless or
- * wrong applied uniformly across different Check data types.
+ * wrong applied uniformly across different Check data types. A discriminated
+ * union rather than an optional `numericTolerance` field so that rule is
+ * structurally required wherever it's meaningful (Q11: every numeric Check
+ * carries its own tolerance, not an implicit Round-wide default) and
+ * structurally absent where it isn't (a boolean Check's rule is exact-match,
+ * full stop — there is nothing for a tolerance field to mean).
  */
-export interface CheckDefinition {
+export interface BooleanCheckDefinition {
   name: string;
   description: string;
-  scoringType: CheckScoringType;
-  /** Only meaningful when scoringType is "numeric" — max allowed |a - b| between two judges' scores for a Check to count as agreement. */
-  numericTolerance?: number;
+  scoringType: "boolean";
 }
+
+export interface NumericCheckDefinition {
+  name: string;
+  description: string;
+  scoringType: "numeric";
+  /** Max allowed |a - b| between two judges' scores for this Check to count as agreement. */
+  numericTolerance: number;
+}
+
+export type CheckDefinition = BooleanCheckDefinition | NumericCheckDefinition;
 
 export interface Rubric {
   key: string;
@@ -91,6 +104,17 @@ export interface GraderPack {
    * escalation dispatches a new Task dynamically, mid-run (ADR 0002).
    */
   allowHostedEscalation?: boolean;
+  /**
+   * Optional hard dollar ceiling on the rare escalation path (Grader
+   * Session 5's `budget.ts` — see FUTUREPLAN.md's cost-basis note: routine
+   * Grader operation is $0 by design, so this bounds escalation Tasks only,
+   * not a per-Grading-Run cost the way `BudgetConfig.runCeilingUsd` bounds
+   * the simulation stack). Declared here now, unenforced until Session 5's
+   * `budget.ts` does a running-total check per escalation dispatch — the
+   * field exists from Session 1 so that check has something to compare
+   * against without a later schema/type retrofit.
+   */
+  graderCeilingUsd?: number;
 }
 
 /** Data-only snapshot of a GraderPack, persisted onto its GradingRun — `loadCases` is a function and isn't serializable, so it's deliberately excluded (mirrors `Run.config`'s role for the simulation stack). */
@@ -100,6 +124,7 @@ export interface GraderPackConfigSnapshot {
   layers?: LayerConfig;
   dataPolicy: "synthetic-only" | "restricted";
   allowHostedEscalation?: boolean;
+  graderCeilingUsd?: number;
 }
 
 export type GradingRunStatus = "running" | "completed" | "budget-stopped" | "crashed";

@@ -1,5 +1,6 @@
 export { GraderDb, newGraderId } from "./db.js";
 export type {
+  BooleanCheckDefinition,
   Case,
   CaseInput,
   CheckConsensusOutcome,
@@ -16,6 +17,7 @@ export type {
   LayerId,
   LayerOverride,
   LayerPrerequisite,
+  NumericCheckDefinition,
   Rubric,
   RubricSnapshot,
   Task,
