@@ -13,6 +13,8 @@ import path from "node:path";
 import { Command } from "commander";
 import { DEFAULT_SESSIONS_PER_CHUNK, runAnalyst } from "../analyst/analyze.js";
 import { DroverDb } from "../db/database.js";
+import { validateGraderPack } from "../grader/pack-validation.js";
+import type { GraderPack } from "../grader/types.js";
 import { loadDefaultExport } from "../orchestrator/config-loader.js";
 import { runDiscovery } from "../orchestrator/run-discovery.js";
 import { buildRunReport, renderMarkdownReport } from "../report/index.js";
@@ -39,21 +41,12 @@ async function runCommand(
 ): Promise<void> {
   await registerTsLoader();
 
-  const domainPack = await loadDefaultExport<DomainPack>(
-    domainPackPath,
-    "domain pack",
-  );
-  const config = await loadDefaultExport<SimConfig>(
-    options.config,
-    "sim config",
-  );
+  const domainPack = await loadDefaultExport<DomainPack>(domainPackPath, "domain pack");
+  const config = await loadDefaultExport<SimConfig>(options.config, "sim config");
 
   const outPath = options.out ?? path.join("runs", `${Date.now()}.sqlite`);
   mkdirSync(path.dirname(outPath) || ".", { recursive: true });
-  const screenshotDir = path.join(
-    path.dirname(outPath) || "runs",
-    "screenshots",
-  );
+  const screenshotDir = path.join(path.dirname(outPath) || "runs", "screenshots");
 
   console.log(`Running "${domainPack.appName}"`);
   console.log(`  dimensions: ${JSON.stringify(config.runDimensions)}`);
@@ -122,10 +115,7 @@ async function analyzeCommand(
   }
 }
 
-async function reportCommand(
-  runId: string,
-  options: { db: string; out?: string },
-): Promise<void> {
+async function reportCommand(runId: string, options: { db: string; out?: string }): Promise<void> {
   const db = new DroverDb(options.db);
   try {
     const report = buildRunReport(db, runId);
@@ -174,9 +164,7 @@ async function stampedeCommand(
       iterationsPerWorker,
     });
 
-    console.log(
-      `Stampede run ${result.stampedeRunId} against ${result.targetBaseUrl}`,
-    );
+    console.log(`Stampede run ${result.stampedeRunId} against ${result.targetBaseUrl}`);
     console.log(`  routes: ${result.routes.join(", ")}\n`);
     console.log(
       `  ${"route".padEnd(30)}${"conc".padEnd(6)}${"samples".padEnd(9)}${"errors".padEnd(8)}${"p50".padEnd(8)}${"p95".padEnd(8)}p99`,
@@ -191,42 +179,62 @@ async function stampedeCommand(
   }
 }
 
+/**
+ * `drover grade <pack> [--db path]` (FUTUREPLAN.md Grader Session 2). Loads
+ * and statically validates a GraderPack — every Case.rubric key resolves,
+ * layers is a well-formed sparse map, any declared prerequisite DAG
+ * resolves without a cycle — before anything would spend real work
+ * dispatching Tasks against it. `--db` is accepted now for forward
+ * compatibility with the scheduler (Session 3+) but isn't opened or written
+ * to yet; no Tasks dispatch in this session.
+ *
+ * Forward note for whoever wires `--db` for real: `validateGraderPack` must
+ * keep resolving (this function's current call order already guarantees
+ * that — nothing below it opens `GraderDb`) before any `grading_runs` row
+ * gets inserted. A malformed pack should never leave a "crashed"
+ * `grading_runs` row behind for something that never actually started
+ * grading anything — that's a confusing thing to find while triaging real
+ * runs later.
+ */
+async function gradeCommand(packPath: string, options: { db?: string }): Promise<void> {
+  await registerTsLoader();
+
+  const pack = await loadDefaultExport<GraderPack>(packPath, "GraderPack");
+
+  console.log(`Validating GraderPack "${pack.appName}"`);
+  await validateGraderPack(pack);
+
+  console.log(`GraderPack "${pack.appName}" is valid.`);
+  console.log(`  rubrics:               ${Object.keys(pack.rubrics).join(", ") || "(none)"}`);
+  console.log(`  dataPolicy:            ${pack.dataPolicy}`);
+  console.log(`  allowHostedEscalation: ${pack.allowHostedEscalation ?? false}`);
+  if (options.db) {
+    console.log(`  db:                    ${options.db} (not yet used by this session)`);
+  }
+  console.log(
+    "No Tasks dispatched — the grading engine (scheduler + layers) lands in a later session.",
+  );
+}
+
 const program = new Command();
 program
   .name("drover")
-  .description(
-    "Config-driven simulation harness that runs AI-driven personas through a web app.",
-  );
+  .description("Config-driven simulation harness that runs AI-driven personas through a web app.");
 
 program
   .command("run")
   .description("Run discovery mode against a domain pack.")
-  .argument(
-    "<domain-pack>",
-    "path to a .ts module exporting a DomainPack as its default export",
-  )
-  .option(
-    "-c, --config <path>",
-    "path to a sim.config.ts module",
-    "sim.config.ts",
-  )
-  .option(
-    "-o, --out <path>",
-    "SQLite output file path (default: runs/<timestamp>.sqlite)",
-  )
-  .action(
-    async (
-      domainPackPath: string,
-      options: { config: string; out?: string },
-    ) => {
-      try {
-        await runCommand(domainPackPath, options);
-      } catch (err) {
-        console.error(err instanceof Error ? err.message : err);
-        process.exitCode = 1;
-      }
-    },
-  );
+  .argument("<domain-pack>", "path to a .ts module exporting a DomainPack as its default export")
+  .option("-c, --config <path>", "path to a sim.config.ts module", "sim.config.ts")
+  .option("-o, --out <path>", "SQLite output file path (default: runs/<timestamp>.sqlite)")
+  .action(async (domainPackPath: string, options: { config: string; out?: string }) => {
+    try {
+      await runCommand(domainPackPath, options);
+    } catch (err) {
+      console.error(err instanceof Error ? err.message : err);
+      process.exitCode = 1;
+    }
+  });
 
 program
   .command("analyze")
@@ -238,11 +246,7 @@ program
     "-d, --db <path>",
     "path to the run's SQLite file (the --out path from `drover run`)",
   )
-  .option(
-    "--poll-interval-ms <ms>",
-    "Batch API polling interval in milliseconds",
-    "5000",
-  )
+  .option("--poll-interval-ms <ms>", "Batch API polling interval in milliseconds", "5000")
   .option(
     "--sessions-per-chunk <n>",
     "max sessions per analyst request — splits a large run across multiple concurrent requests",
@@ -270,10 +274,7 @@ program
     "-d, --db <path>",
     "path to the run's SQLite file (the --out path from `drover run`)",
   )
-  .option(
-    "-o, --out <path>",
-    "write the report to this file instead of printing it to stdout",
-  )
+  .option("-o, --out <path>", "write the report to this file instead of printing it to stdout")
   .action(async (runId: string, options: { db: string; out?: string }) => {
     try {
       await reportCommand(runId, options);
@@ -288,10 +289,7 @@ program
   .description(
     "Replay a completed discovery run's discovered routes as scripted (non-LLM) load-test traffic.",
   )
-  .argument(
-    "<run-id>",
-    "id of a previously completed discovery run to pull routes/target from",
-  )
+  .argument("<run-id>", "id of a previously completed discovery run to pull routes/target from")
   .requiredOption(
     "-d, --db <path>",
     "path to the run's SQLite file (the --out path from `drover run`)",
@@ -319,5 +317,21 @@ program
       }
     },
   );
+
+program
+  .command("grade")
+  .description(
+    "Validate a GraderPack (Grader — a separate subsystem, see CONTEXT.md's Glossary). Does not yet dispatch any Tasks.",
+  )
+  .argument("<pack>", "path to a .ts module exporting a GraderPack as its default export")
+  .option("-d, --db <path>", "path to a grader.sqlite output file (not yet used)")
+  .action(async (packPath: string, options: { db?: string }) => {
+    try {
+      await gradeCommand(packPath, options);
+    } catch (err) {
+      console.error(err instanceof Error ? err.message : err);
+      process.exitCode = 1;
+    }
+  });
 
 program.parseAsync(process.argv);

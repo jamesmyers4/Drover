@@ -68,6 +68,8 @@ No budget-ceiling formula is needed the way `SESSION-10-PLAN.md` needed one for 
 
 ## Grader Session 1 — Storage-layer generalization + schema foundation
 
+**Status: done, 2026-07-31 — not yet committed, review the diff.** `src/db/sqlite-store.ts` now holds the generic `SqliteStore` (connection + versioned-migration runner), extracted from `DroverDb`'s old constructor/migrate/close logic; `DroverDb extends SqliteStore` unchanged in behavior. `grader.sqlite`'s schema (`src/grader/migrations.ts`) and `GraderDb` (`src/grader/db.ts`) built on the same base. Core types in `src/grader/types.ts`, barrel at `src/grader/index.ts`, wired into the top-level `src/index.ts` export. One post-review refinement: `CheckDefinition` became a discriminated union (`BooleanCheckDefinition | NumericCheckDefinition`) so a numeric Check's tolerance rule is structurally required, not an optional field a pack author could silently omit (closes a real Q11 gap flagged in review); `graderCeilingUsd?: number` added to `GraderPack`/`GraderPackConfigSnapshot` so Session 5's `budget.ts` has a home to read from without a later schema retrofit. 13 tests in `tests/grader/db.test.ts`. Full detail in the session transcript.
+
 **Cost: $0.** No LLM calls, no CLI yet.
 
 **Goal:** a real, migrated `grader.sqlite` schema and the core TypeScript types, with zero forked code from `src/db/`.
@@ -87,6 +89,8 @@ No budget-ceiling formula is needed the way `SESSION-10-PLAN.md` needed one for 
 ---
 
 ## Grader Session 2 — GraderPack contract, static validation, CLI skeleton
+
+**Status: done, 2026-07-31 — not yet committed, review the diff.** `validateGraderPack` (`src/grader/pack-validation.ts`) collects every issue in one pass rather than throwing on the first — checks `layers` is a well-formed sparse map (valid 1-7 keys, `enabled`/`requires` shape, every declared prerequisite carries a non-empty justification string), the declared prerequisite DAG has no cycle (DFS, only run once `layers` itself is well-formed, to avoid a redundant cascade error), and every `Case.rubric` (via `pack.loadCases()`) resolves against `GraderPack.rubrics` — plus a `cases-load-failed` issue if `loadCases()` itself throws, so a real failure there is a clean reported issue rather than an unhandled rejection. `drover grade <pack> [--db path]` wired into `src/cli/index.ts` (`--db` accepted for forward compatibility, not yet opened/written). Manually verified end-to-end against throwaway fixture packs: exit 0 + valid-pack summary, exit 1 + multi-issue message on a pack with both a typo'd rubric key and a real prerequisite cycle. Post-review addition: a fourth check (`malformed-rubric`) validates every Rubric's `CheckDefinition`s actually carry the tolerance rule their `scoringType` requires — the Session 1 discriminated union is a compile-time-only guarantee (packs load via `tsx`, untyped at runtime), so a numeric Check missing `numericTolerance` or a boolean Check carrying a stray one is now caught here instead of breaking mid-Grading-Run once `consensus.ts` (Session 5) tries to read it. Also left a breadcrumb in `gradeCommand`'s doc comment for whoever wires `--db` for real in Session 3: validation must keep resolving before any `grading_runs` row is inserted, so a malformed pack never leaves a "crashed" row for a grading run that never actually started. 17 tests in `tests/grader/pack-validation.test.ts`. Full detail in the session transcript.
 
 **Cost: $0.**
 

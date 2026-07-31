@@ -1,5 +1,13 @@
 export { GraderDb, newGraderId } from "./db.js";
 export type {
+  GraderPackValidationIssue,
+  GraderPackValidationIssueCode,
+} from "./pack-validation.js";
+export {
+  GraderPackValidationError,
+  validateGraderPack,
+} from "./pack-validation.js";
+export type {
   BooleanCheckDefinition,
   Case,
   CaseInput,
