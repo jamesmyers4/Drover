@@ -25,6 +25,7 @@ const samplePackConfig: GraderPackConfigSnapshot = {
           description: "Output doesn't state anything unsupported by input.",
           scoringType: "numeric",
           numericTolerance: 0.1,
+          passThreshold: { comparison: "gte", value: 0.8 },
         },
       ],
     },

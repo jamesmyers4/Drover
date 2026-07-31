@@ -31,12 +31,31 @@ export interface BooleanCheckDefinition {
   scoringType: "boolean";
 }
 
+/**
+ * How a numeric Check's resolved score converts to a single judge's own
+ * pass/fail verdict — distinct from `numericTolerance`, which only governs
+ * whether two judges' scores count as *agreement* with each other (Q11).
+ * Neither field can stand in for the other: two judges scoring a
+ * faithfulness Check "3/10" apiece agree perfectly (small `numericTolerance`
+ * gap) while both clearly failing the Check on its merits — `passThreshold`
+ * is what makes that failure visible instead of silently absorbed into a
+ * boolean-only verdict. `comparison` carries an explicit direction because
+ * "higher is better" doesn't hold for every metric (e.g. a hallucination-
+ * rate Check wants `lte`, a quality-score Check wants `gte`).
+ */
+export interface NumericPassThreshold {
+  comparison: "gte" | "lte";
+  value: number;
+}
+
 export interface NumericCheckDefinition {
   name: string;
   description: string;
   scoringType: "numeric";
   /** Max allowed |a - b| between two judges' scores for this Check to count as agreement. */
   numericTolerance: number;
+  /** The score a single judge's own verdict must satisfy to count as a pass for this Check — see `NumericPassThreshold`'s doc comment for why this is a separate concept from `numericTolerance`. */
+  passThreshold: NumericPassThreshold;
 }
 
 export type CheckDefinition = BooleanCheckDefinition | NumericCheckDefinition;

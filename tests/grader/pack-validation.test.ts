@@ -175,7 +175,7 @@ describe("validateGraderPack", () => {
     }
   });
 
-  it("passes a rubric whose numeric Check carries a finite numericTolerance", async () => {
+  it("passes a rubric whose numeric Check carries a finite numericTolerance and a well-formed passThreshold", async () => {
     const pack = makeValidPack({
       rubrics: {
         "tone-eval": {
@@ -187,6 +187,7 @@ describe("validateGraderPack", () => {
               description: "d",
               scoringType: "numeric",
               numericTolerance: 0.1,
+              passThreshold: { comparison: "gte", value: 0.8 },
             },
           ],
         },
@@ -195,7 +196,7 @@ describe("validateGraderPack", () => {
     await expect(validateGraderPack(pack)).resolves.toEqual(expect.any(Array));
   });
 
-  it("fails with malformed-rubric when a numeric Check is missing numericTolerance", async () => {
+  it("fails with malformed-rubric (one issue per missing field) when a numeric Check is missing numericTolerance and passThreshold", async () => {
     const pack = makeValidPack({
       rubrics: {
         "tone-eval": {
@@ -206,10 +207,32 @@ describe("validateGraderPack", () => {
         },
       },
     });
+    await expectIssueCodes(pack, ["malformed-rubric", "malformed-rubric"]);
+  });
+
+  it("fails with malformed-rubric when a numeric Check's passThreshold has an invalid comparison direction", async () => {
+    const pack = makeValidPack({
+      rubrics: {
+        "tone-eval": {
+          key: "tone-eval",
+          description: "d",
+          checks: [
+            {
+              name: "faithfulness",
+              description: "d",
+              scoringType: "numeric",
+              numericTolerance: 0.1,
+              // biome-ignore lint/suspicious/noExplicitAny: intentionally malformed for the validator
+              passThreshold: { comparison: "greater-than", value: 0.8 } as any,
+            },
+          ],
+        },
+      },
+    });
     await expectIssueCodes(pack, ["malformed-rubric"]);
   });
 
-  it("fails with malformed-rubric when a boolean Check carries a stray numericTolerance", async () => {
+  it("fails with malformed-rubric when a boolean Check carries a stray numericTolerance or passThreshold", async () => {
     const pack = makeValidPack({
       rubrics: {
         "tone-eval": {
@@ -221,13 +244,14 @@ describe("validateGraderPack", () => {
               description: "d",
               scoringType: "boolean",
               numericTolerance: 0.1,
+              passThreshold: { comparison: "gte", value: 1 },
               // biome-ignore lint/suspicious/noExplicitAny: intentionally malformed for the validator
             } as any,
           ],
         },
       },
     });
-    await expectIssueCodes(pack, ["malformed-rubric"]);
+    await expectIssueCodes(pack, ["malformed-rubric", "malformed-rubric"]);
   });
 
   it("fails with malformed-rubric when a Check's scoringType is neither boolean nor numeric", async () => {

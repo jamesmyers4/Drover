@@ -261,6 +261,15 @@ function validateRubrics(pack: GraderPack, issues: GraderPackValidationIssue[]):
               "declare a tolerance.",
           });
         }
+        if ("passThreshold" in rawCheck && rawCheck.passThreshold !== undefined) {
+          issues.push({
+            code: "malformed-rubric",
+            message:
+              `rubrics["${rubricKey}"].checks ${label} has scoringType "boolean" but also sets ` +
+              "passThreshold — a boolean Check's pass/fail *is* its own true/false value and must " +
+              "not declare a separate threshold.",
+          });
+        }
       } else if (rawCheck.scoringType === "numeric") {
         if (
           typeof rawCheck.numericTolerance !== "number" ||
@@ -272,6 +281,26 @@ function validateRubrics(pack: GraderPack, issues: GraderPackValidationIssue[]):
               `rubrics["${rubricKey}"].checks ${label} has scoringType "numeric" but is missing ` +
               "a finite numericTolerance — every numeric Check must carry its own tolerance rule " +
               "(Q11: tolerance is never an implicit Round-wide default).",
+          });
+        }
+        const passThreshold = rawCheck.passThreshold;
+        const hasValidComparison =
+          isPlainObject(passThreshold) &&
+          (passThreshold.comparison === "gte" || passThreshold.comparison === "lte");
+        const hasValidValue =
+          isPlainObject(passThreshold) &&
+          typeof passThreshold.value === "number" &&
+          Number.isFinite(passThreshold.value);
+        if (!hasValidComparison || !hasValidValue) {
+          issues.push({
+            code: "malformed-rubric",
+            message:
+              `rubrics["${rubricKey}"].checks ${label} has scoringType "numeric" but is missing ` +
+              'a well-formed passThreshold ({ comparison: "gte"|"lte", value: <finite number> }) ' +
+              "— every numeric Check must define what score counts as a pass for a single judge's " +
+              "own verdict, independent of numericTolerance's judge-agreement rule (a gap found " +
+              "and fixed after Session 4: two judges could agree perfectly on a bad score with no " +
+              "way to record that as a failure).",
           });
         }
       } else {
