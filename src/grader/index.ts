@@ -1,3 +1,10 @@
+export { GraderBudget, GraderBudgetExceededError } from "./budget.js";
+export type { RunConsensusRoundOptions, RunConsensusRoundResult } from "./consensus.js";
+export {
+  DEFAULT_MAX_DISPATCH_ATTEMPTS,
+  DEFAULT_RETRY_BACKOFF_BASE_MS,
+  runConsensusRound,
+} from "./consensus.js";
 export { GraderDb, newGraderId } from "./db.js";
 export type {
   LayerCheckOutcome,
@@ -5,7 +12,7 @@ export type {
   LayerRegistry,
   LayerRunContext,
 } from "./layer.js";
-export { createSingleJudgeLayer } from "./layers/judge-layer.js";
+export { checkPasses, createSingleJudgeLayer } from "./layers/judge-layer.js";
 export { layer1 } from "./layers/layer1.js";
 export { createLayer2 } from "./layers/layer2.js";
 export { createLayer3 } from "./layers/layer3.js";
@@ -38,7 +45,15 @@ export {
 } from "./provider.js";
 export { resolveRubric, snapshotRubric, UnknownRubricError } from "./rubric.js";
 export type { RunGradingRunOptions, RunGradingRunResult } from "./scheduler.js";
-export { DEFAULT_LAYER_REGISTRY, resolveLayerDispatchOrder, runGradingRun } from "./scheduler.js";
+export {
+  assertDistinctModelFamilies,
+  assertEscalationDispatchAllowed,
+  DEFAULT_LAYER_REGISTRY,
+  DuplicateModelFamilyError,
+  InsufficientJudgesError,
+  resolveLayerDispatchOrder,
+  runGradingRun,
+} from "./scheduler.js";
 export type {
   BooleanCheckDefinition,
   Case,
@@ -49,6 +64,7 @@ export type {
   CheckResult,
   CheckScoringType,
   ConsensusRound,
+  ConsensusRoundStatus,
   GraderPack,
   GraderPackConfigSnapshot,
   GradingRun,

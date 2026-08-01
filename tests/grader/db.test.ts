@@ -236,6 +236,7 @@ describe("GraderDb", () => {
       id: newGraderId(),
       caseId: c.id,
       layerId: 3,
+      status: "pending",
       checkResolutions: [],
       createdAt: 2000,
     };
@@ -253,10 +254,44 @@ describe("GraderDb", () => {
     );
 
     const resolved = db.getConsensusRound(round.id);
+    expect(resolved?.status).toBe("resolved");
     expect(resolved?.resolvedAt).toBe(2500);
     expect(resolved?.checkResolutions).toEqual([
       { name: "on-brand-tone", outcome: "agreed", finalValue: true },
       { name: "faithfulness", outcome: "escalated", finalValue: 0.8 },
+    ]);
+  });
+
+  it("abortConsensusRound marks the round aborted-error with a reason, timestamp, and whatever partial resolutions preceded the failure", () => {
+    const run = makeGradingRun();
+    db.insertGradingRun(run);
+    const c = makeCase(run.id);
+    db.insertCase(c);
+
+    const round: ConsensusRound = {
+      id: newGraderId(),
+      caseId: c.id,
+      layerId: 3,
+      status: "pending",
+      checkResolutions: [],
+      createdAt: 2000,
+    };
+    db.insertConsensusRound(round);
+
+    db.abortConsensusRound(
+      round.id,
+      [{ name: "on-brand-tone", outcome: "agreed", finalValue: true }],
+      "Ollama request failed: 503 Service Unavailable",
+      2600,
+    );
+
+    const aborted = db.getConsensusRound(round.id);
+    expect(aborted?.status).toBe("aborted-error");
+    expect(aborted?.abortedReason).toBe("Ollama request failed: 503 Service Unavailable");
+    expect(aborted?.abortedAt).toBe(2600);
+    expect(aborted?.resolvedAt).toBeUndefined();
+    expect(aborted?.checkResolutions).toEqual([
+      { name: "on-brand-tone", outcome: "agreed", finalValue: true },
     ]);
   });
 
@@ -270,6 +305,7 @@ describe("GraderDb", () => {
       id: newGraderId(),
       caseId: c.id,
       layerId: 3,
+      status: "pending",
       checkResolutions: [],
       createdAt: 2000,
     };

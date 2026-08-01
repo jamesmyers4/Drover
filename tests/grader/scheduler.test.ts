@@ -2,7 +2,15 @@ import { describe, expect, it } from "vitest";
 import { GraderDb } from "../../src/grader/db.js";
 import type { LayerImplementation, LayerRegistry } from "../../src/grader/layer.js";
 import { layer1 } from "../../src/grader/layers/layer1.js";
-import { resolveLayerDispatchOrder, runGradingRun } from "../../src/grader/scheduler.js";
+import { ScriptedGraderProvider } from "../../src/grader/provider.js";
+import {
+  assertDistinctModelFamilies,
+  assertEscalationDispatchAllowed,
+  DuplicateModelFamilyError,
+  InsufficientJudgesError,
+  resolveLayerDispatchOrder,
+  runGradingRun,
+} from "../../src/grader/scheduler.js";
 import type { GraderPack, LayerId, Rubric } from "../../src/grader/types.js";
 
 const noneRubric: Rubric = { key: "none", description: "Not consumed by Layer 1.", checks: [] };
@@ -272,5 +280,44 @@ describe("runGradingRun", () => {
     expect(rows).toHaveLength(1);
     expect(rows[0]?.status).toBe("crashed");
     db.close();
+  });
+});
+
+describe("assertDistinctModelFamilies", () => {
+  it("passes when every judge has a distinct modelFamily", () => {
+    expect(() =>
+      assertDistinctModelFamilies([{ modelFamily: "qwen2.5" }, { modelFamily: "llama3.1" }]),
+    ).not.toThrow();
+  });
+
+  it("throws InsufficientJudgesError with fewer than 2 judges", () => {
+    expect(() => assertDistinctModelFamilies([{ modelFamily: "qwen2.5" }])).toThrow(
+      InsufficientJudgesError,
+    );
+    expect(() => assertDistinctModelFamilies([])).toThrow(InsufficientJudgesError);
+  });
+
+  it("throws DuplicateModelFamilyError when two judges share a modelFamily — the coincidental-diversity failure mode ADR 0003 exists to catch", () => {
+    const sameModelTwice = [new ScriptedGraderProvider([[]]), new ScriptedGraderProvider([[]])];
+    expect(() => assertDistinctModelFamilies(sameModelTwice)).toThrow(DuplicateModelFamilyError);
+  });
+});
+
+describe("assertEscalationDispatchAllowed", () => {
+  it("allows a synthetic-only pack regardless of allowHostedEscalation", () => {
+    expect(() => assertEscalationDispatchAllowed({ dataPolicy: "synthetic-only" })).not.toThrow();
+  });
+
+  it("throws for a restricted pack that hasn't set allowHostedEscalation: true", () => {
+    expect(() => assertEscalationDispatchAllowed({ dataPolicy: "restricted" })).toThrow();
+    expect(() =>
+      assertEscalationDispatchAllowed({ dataPolicy: "restricted", allowHostedEscalation: false }),
+    ).toThrow();
+  });
+
+  it("allows a restricted pack that has explicitly set allowHostedEscalation: true", () => {
+    expect(() =>
+      assertEscalationDispatchAllowed({ dataPolicy: "restricted", allowHostedEscalation: true }),
+    ).not.toThrow();
   });
 });

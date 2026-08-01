@@ -16,6 +16,7 @@ import type {
   CheckResolution,
   CheckResult,
   ConsensusRound,
+  ConsensusRoundStatus,
   GraderPackConfigSnapshot,
   GradingRun,
   GradingRunStatus,
@@ -148,42 +149,71 @@ export class GraderDb extends SqliteStore {
   insertConsensusRound(round: ConsensusRound): void {
     this.db
       .prepare(
-        "INSERT INTO consensus_rounds (id, case_id, layer_id, check_resolutions_json, created_at, resolved_at) VALUES (?, ?, ?, ?, ?, ?)",
+        "INSERT INTO consensus_rounds (id, case_id, layer_id, status, check_resolutions_json, created_at, resolved_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
       )
       .run(
         round.id,
         round.caseId,
         round.layerId,
+        round.status,
         JSON.stringify(round.checkResolutions),
         round.createdAt,
         round.resolvedAt ?? null,
       );
   }
 
-  /** Writes every Check's final resolution at once — a Round resolves as a unit once every disputed Check's escalation (if any) has completed. */
+  /** Writes every Check's final resolution at once and marks the round `resolved` — a Round resolves as a unit once every disputed Check's escalation (if any) has completed. */
   resolveConsensusRound(id: string, checkResolutions: CheckResolution[], resolvedAt: number): void {
     this.db
       .prepare(
-        "UPDATE consensus_rounds SET check_resolutions_json = ?, resolved_at = ? WHERE id = ?",
+        "UPDATE consensus_rounds SET status = 'resolved', check_resolutions_json = ?, resolved_at = ? WHERE id = ?",
       )
       .run(JSON.stringify(checkResolutions), resolvedAt, id);
+  }
+
+  /**
+   * Marks a round `aborted-error` — every retry of a judge/escalation
+   * dispatch was exhausted (Session 5's bounded-retry policy), never called
+   * for a guard violation (those keep throwing directly, uncaught). Persists
+   * whatever Checks were actually resolved before the failing dispatch
+   * (`checkResolutions` may be a strict subset of the rubric's full Check
+   * list) alongside the underlying error's message — an honest partial
+   * record, not a discarded one.
+   */
+  abortConsensusRound(
+    id: string,
+    checkResolutions: CheckResolution[],
+    abortedReason: string,
+    abortedAt: number,
+  ): void {
+    this.db
+      .prepare(
+        "UPDATE consensus_rounds SET status = 'aborted-error', check_resolutions_json = ?, aborted_reason = ?, aborted_at = ? WHERE id = ?",
+      )
+      .run(JSON.stringify(checkResolutions), abortedReason, abortedAt, id);
   }
 
   private mapConsensusRoundRow(row: {
     id: string;
     case_id: string;
     layer_id: number;
+    status: ConsensusRoundStatus;
     check_resolutions_json: string;
     created_at: number;
     resolved_at: number | null;
+    aborted_reason: string | null;
+    aborted_at: number | null;
   }): ConsensusRound {
     return {
       id: row.id,
       caseId: row.case_id,
       layerId: row.layer_id as LayerId,
+      status: row.status,
       checkResolutions: JSON.parse(row.check_resolutions_json) as CheckResolution[],
       createdAt: row.created_at,
       ...(row.resolved_at !== null && { resolvedAt: row.resolved_at }),
+      ...(row.aborted_reason !== null && { abortedReason: row.aborted_reason }),
+      ...(row.aborted_at !== null && { abortedAt: row.aborted_at }),
     };
   }
 
@@ -193,9 +223,12 @@ export class GraderDb extends SqliteStore {
           id: string;
           case_id: string;
           layer_id: number;
+          status: ConsensusRoundStatus;
           check_resolutions_json: string;
           created_at: number;
           resolved_at: number | null;
+          aborted_reason: string | null;
+          aborted_at: number | null;
         }
       | undefined;
     return row ? this.mapConsensusRoundRow(row) : undefined;
@@ -208,9 +241,12 @@ export class GraderDb extends SqliteStore {
       id: string;
       case_id: string;
       layer_id: number;
+      status: ConsensusRoundStatus;
       check_resolutions_json: string;
       created_at: number;
       resolved_at: number | null;
+      aborted_reason: string | null;
+      aborted_at: number | null;
     }[];
     return rows.map((row) => this.mapConsensusRoundRow(row));
   }

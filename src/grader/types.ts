@@ -244,6 +244,32 @@ export interface CheckResolution {
 }
 
 /**
+ * A round's own top-level lifecycle state — distinct from a Check's
+ * per-resolution `CheckConsensusOutcome` (`agreed`/`escalated`). `pending` is
+ * the state between `insertConsensusRound` and whichever terminal state the
+ * round reaches; under v1's synchronous, sequential dispatch it should only
+ * ever be observed if the process is killed mid-round (an OOM, a hard
+ * process kill) before either terminal write lands — the same relationship
+ * `GradingRunStatus`'s `running` has to `completed`/`crashed`.
+ *
+ * `aborted-error` (Session 5) is a genuinely distinct third terminal state,
+ * not a shade of `resolved` or an absence of it — added for the same reason
+ * Q5 made `skipped` a first-class `TaskStatus` value rather than letting a
+ * report infer it from missing data: collapsing "a judge/escalation
+ * provider call failed even after retries" into "not yet resolved" would
+ * make an aborted round indistinguishable from one that's still legitimately
+ * in flight, and collapsing it into "resolved" (with empty/partial
+ * `checkResolutions`) would misrepresent a coverage gap as a real verdict.
+ * Set only when every retry (`RunConsensusRoundOptions.maxDispatchAttempts`)
+ * of a judge or escalation dispatch has been exhausted — never for a guard
+ * violation (`assertDistinctModelFamilies`, `assertEscalationDispatchAllowed`,
+ * `GraderBudget.assertCanDispatch`), which are deliberate, non-retriable
+ * stops that must keep throwing loudly rather than being softened into this
+ * bucket.
+ */
+export type ConsensusRoundStatus = "pending" | "resolved" | "aborted-error";
+
+/**
  * The set of Tasks belonging to one multi-judge layer on one Case, plus
  * resolution. Resolution is per-Check, not holistic (Q11): each Check where
  * all judges agree (per that Check's own agreement rule) settles
@@ -255,10 +281,22 @@ export interface ConsensusRound {
   id: string;
   caseId: string;
   layerId: LayerId;
-  /** Empty until resolution runs; one entry per Check the layer's judges scored. */
+  status: ConsensusRoundStatus;
+  /** Whatever Checks were actually resolved before the round reached a terminal state — empty on a fresh `pending` round, partial on an `aborted-error` one (the Checks resolved before the failing dispatch), complete on `resolved`. */
   checkResolutions: CheckResolution[];
   /** Raw epoch milliseconds. */
   createdAt: number;
-  /** Set once every Check in the round has a final resolution. */
+  /** Set only when status is "resolved" — every Check in the round has a final resolution. */
   resolvedAt?: number;
+  /**
+   * Set only when status is "aborted-error" — the underlying judge/
+   * escalation provider error's message, after every retry attempt was
+   * exhausted. Infrastructure noise, not a quality signal: this is what
+   * keeps a report's escalation-rate metric (Q10) interpretable, since a
+   * flaky provider call and a genuine judge disagreement are categorically
+   * different reasons a Check might not have a clean "agreed" resolution.
+   */
+  abortedReason?: string;
+  /** Raw epoch milliseconds — set only when status is "aborted-error". */
+  abortedAt?: number;
 }

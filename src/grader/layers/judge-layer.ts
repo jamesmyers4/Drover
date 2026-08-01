@@ -24,8 +24,13 @@ import type { CheckDefinition, LayerId } from "../types.js";
  * judge's own score. `validateGraderPack` already guarantees every numeric
  * Check carries a well-formed `passThreshold`, so this doesn't re-validate
  * shape, only applies it.
+ *
+ * Exported so `consensus.ts` can reuse the exact same single-judge verdict
+ * rule for a judge Task's own status and for computing an escalation Task's
+ * verdict on its one scoped Check — there's exactly one definition of "does
+ * this Check's value pass," and it shouldn't drift into two copies.
  */
-function checkPasses(def: CheckDefinition, value: boolean | number): boolean {
+export function checkPasses(def: CheckDefinition, value: boolean | number): boolean {
   if (def.scoringType === "boolean") return value === true;
   const { comparison, value: threshold } = def.passThreshold;
   return comparison === "gte" ? (value as number) >= threshold : (value as number) <= threshold;

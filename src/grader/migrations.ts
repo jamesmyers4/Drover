@@ -72,4 +72,23 @@ export const graderMigrations: Migration[] = [
       CREATE INDEX idx_tasks_consensus_round ON tasks(consensus_round_id);
     `,
   },
+  {
+    version: 2,
+    name: "consensus-round-abort-state",
+    // Grader Session 5: a round that exhausts every retry on a judge/escalation
+    // provider call is a genuinely distinct third terminal state, not a shade
+    // of "not yet resolved" or "resolved with a gap" — see `ConsensusRoundStatus`'s
+    // doc comment in types.ts for the full reasoning. `status` defaults to
+    // 'pending' so every row this migration back-fills for (there are none in
+    // practice yet, since this ships in the same session that introduces the
+    // column) and every future `insertConsensusRound` call that doesn't specify
+    // it lands in the correct starting state without every caller needing to
+    // pass it explicitly.
+    sql: `
+      ALTER TABLE consensus_rounds ADD COLUMN status TEXT NOT NULL DEFAULT 'pending'
+        CHECK (status IN ('pending', 'resolved', 'aborted-error'));
+      ALTER TABLE consensus_rounds ADD COLUMN aborted_reason TEXT;
+      ALTER TABLE consensus_rounds ADD COLUMN aborted_at INTEGER;
+    `,
+  },
 ];

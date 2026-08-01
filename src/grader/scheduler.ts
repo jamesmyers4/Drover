@@ -17,6 +17,7 @@ import { type GraderDb, newGraderId } from "./db.js";
 import type { LayerCheckOutcome, LayerRegistry } from "./layer.js";
 import { layer1 } from "./layers/layer1.js";
 import { validateGraderPack } from "./pack-validation.js";
+import { assertHostedGraderDispatchAllowed, type GraderModelProvider } from "./provider.js";
 import type {
   Case,
   GraderPack,
@@ -26,6 +27,67 @@ import type {
   Task,
   TaskStatus,
 } from "./types.js";
+
+/**
+ * Thrown when a Consensus Round is asked to dispatch with fewer than two
+ * judges — a "Round" with a single voter has nothing to reach consensus
+ * against.
+ */
+export class InsufficientJudgesError extends Error {
+  constructor(count: number) {
+    super(`Consensus Round dispatch requires at least 2 judges, got ${count}.`);
+    this.name = "InsufficientJudgesError";
+  }
+}
+
+/**
+ * Thrown when two judges in the same Consensus Round share a `modelFamily`
+ * (ADR 0003) — diversity is a checked structural invariant at
+ * judge-selection/dispatch time, not an assumption inferred from which
+ * physical box happened to run which judge.
+ */
+export class DuplicateModelFamilyError extends Error {
+  constructor(modelFamily: string) {
+    super(
+      `Consensus Round judge dispatch requires a distinct modelFamily per judge (ADR 0003) — ` +
+        `"${modelFamily}" was supplied by more than one judge.`,
+    );
+    this.name = "DuplicateModelFamilyError";
+  }
+}
+
+/**
+ * Asserts a Consensus Round's judge set is well-formed: at least two judges,
+ * every one a distinct model family. Checked at judge-selection/dispatch
+ * time (ADR 0003) — independent of `executionTarget`/physical box placement,
+ * which is free to vary without affecting this guarantee.
+ */
+export function assertDistinctModelFamilies(
+  judges: Pick<GraderModelProvider, "modelFamily">[],
+): void {
+  if (judges.length < 2) throw new InsufficientJudgesError(judges.length);
+  const seen = new Set<string>();
+  for (const judge of judges) {
+    if (seen.has(judge.modelFamily)) throw new DuplicateModelFamilyError(judge.modelFamily);
+    seen.add(judge.modelFamily);
+  }
+}
+
+/**
+ * Second, scheduler-level `dataPolicy`/`allowHostedEscalation` gate,
+ * immediately before any escalation Task dispatch — defense-in-depth
+ * alongside `provider.ts`'s own construction/execution-time guard on
+ * `AnthropicGraderProvider`. ADR 0002 was explicit that one chokepoint isn't
+ * trusted alone: this call is independent of whichever provider instance the
+ * caller happens to be dispatching to, so the check still runs even if a
+ * future caller ever passed an escalation provider that skipped its own
+ * internal gate.
+ */
+export function assertEscalationDispatchAllowed(
+  pack: Pick<GraderPack, "dataPolicy" | "allowHostedEscalation">,
+): void {
+  assertHostedGraderDispatchAllowed(pack);
+}
 
 /** Grows as later sessions add real layer implementations (Session 4: layers 2-3, Session 6: 4-7). */
 export const DEFAULT_LAYER_REGISTRY: LayerRegistry = { 1: layer1 };
