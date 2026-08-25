@@ -26,7 +26,10 @@
  */
 import "dotenv/config";
 import { Client } from "pg";
-import domainPack, { TEST_CHECKIN_CODE, TEST_VOLUNTEER_ID } from "../packs/horse-haven-ops/domain-pack.js";
+import domainPack, {
+  TEST_CHECKIN_CODE,
+  TEST_VOLUNTEER_ID,
+} from "../packs/horse-haven-ops/domain-pack.js";
 import simConfig from "../packs/horse-haven-ops/sim.config.js";
 
 function fail(message: string): never {
@@ -108,11 +111,15 @@ async function main() {
   } finally {
     await client.end();
   }
-  console.log("[preflight] OK  test volunteer exists in the target database with the expected check-in code");
-
-  console.log("[preflight] all checks passed — safe to run `drover run` against packs/horse-haven-ops/");
   console.log(
-    '[preflight] reminder: this does not fully rule out a stale server process — see this ' +
+    "[preflight] OK  test volunteer exists in the target database with the expected check-in code",
+  );
+
+  console.log(
+    "[preflight] all checks passed — safe to run `drover run` against packs/horse-haven-ops/",
+  );
+  console.log(
+    "[preflight] reminder: this does not fully rule out a stale server process — see this " +
       "script's own header comment, and ENVIRONMENT.md Phase 3's netstat check.",
   );
 }
