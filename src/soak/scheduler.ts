@@ -1,11 +1,10 @@
 /**
- * Soak mode's execution loop core (CTS.md Soak Session 3) — the two-lane
- * scheduler, HTTP dispatch, and the `runSoak` entry point that ties them
- * together. No local-model text variation yet (CTS.md Session 4's job):
- * turns dispatch their drawn example text verbatim, proving the scheduler/
- * budget/dispatch mechanics in isolation first — the same "prove the
- * mechanism before adding model infra" precedent Grader Session 3 set with
- * Layer 1 before Session 4 added real judges.
+ * Soak mode's execution loop core (CTS.md Soak Sessions 3-4) — the two-lane
+ * scheduler, local-model text variation, HTTP dispatch, and the `runSoak`
+ * entry point that ties them together. Every turn's example text is lightly
+ * varied by a `SoakContentProvider` (`content-provider.ts`) before dispatch
+ * (CTS.md Session 4; ADR 0009) — the driver only selects and varies, never
+ * authors new content.
  *
  * Two lanes (ADR 0006/CONTEXT.md Glossary "Backbone traffic"):
  * - **backbone**: draws from `lane: "backbone"` pools, paced by a randomized
@@ -23,8 +22,9 @@
  * decision, which is what `SoakBudget.assertCanDispatch()` enforces.
  */
 
-import { validateSoakBlueprint } from "./blueprint-validation.js";
+import { assertSoakDataPolicyAllowed, validateSoakBlueprint } from "./blueprint-validation.js";
 import { SoakBudget } from "./budget.js";
+import { createSoakContentProvider, type SoakContentProvider } from "./content-provider.js";
 import { newSoakId, type SoakDb } from "./db.js";
 import type {
   PipelineBudget,
@@ -65,6 +65,13 @@ export interface RunSoakOptions {
    * or omit it entirely.
    */
   authToken?: string;
+  /**
+   * The local driver that lightly varies each turn's example text (CTS.md
+   * Session 4) — injectable for tests (`ScriptedSoakContentProvider`);
+   * defaults to a real `OllamaSoakContentProvider` built from the
+   * blueprint's own `driverProvider`/`driverModel` (`createSoakContentProvider`).
+   */
+  contentProvider?: SoakContentProvider;
   /** Injectable for tests — defaults to the global `fetch`. */
   fetchImpl?: typeof fetch;
   /** Injectable for tests — defaults to a real `setTimeout`-backed delay. */
@@ -121,6 +128,7 @@ interface LaneContext {
   runStartedAt: number;
   maxDurationMs: number;
   budget: SoakBudget;
+  contentProvider: SoakContentProvider;
   fetchImpl: typeof fetch;
   sleep: (ms: number) => Promise<void>;
   now: () => number;
@@ -132,16 +140,64 @@ interface LaneContext {
   counts: { dispatched: number; explicitErrors: number; gatedResponses: number };
 }
 
-/** Dispatches one turn's HTTP request and persists the resulting `TurnRecord` — never throws (a real error is captured as `explicitError`/`errorDetail`, per CTS.md's own "an explicit error is itself a real result worth having" framing). */
+/**
+ * Dispatches one turn: selects an example, lightly varies it via
+ * `ctx.contentProvider` (CTS.md Session 4), then makes the HTTP request and
+ * persists the resulting `TurnRecord` — never throws for a turn-level
+ * failure (a real error, whether from variation or from HTTP dispatch, is
+ * captured as `explicitError`/`errorDetail`, per CTS.md's own "an explicit
+ * error is itself a real result worth having" framing). The one exception is
+ * `assertSoakDataPolicyAllowed`'s guard, which is never caught here — a
+ * policy violation is a structural misconfiguration, not a transient
+ * per-call failure, so it propagates uncaught and crashes the run, mirroring
+ * how Grader's own guard violations (`assertDistinctModelFamilies`,
+ * `assertEscalationDispatchAllowed`, `GraderBudget.assertCanDispatch`) are
+ * deliberately never folded into that tier's provider-retry-and-continue
+ * treatment either.
+ */
 async function dispatchTurn(ctx: LaneContext, lane: string, pool: VariationPool): Promise<void> {
   const sequence = ++ctx.sequence.n;
   const exampleIndex = Math.floor(ctx.random() * pool.examples.length);
-  const text = pool.examples[exampleIndex];
-  if (text === undefined) throw new Error(`variationPools "${pool.name}" has no examples.`);
+  const exampleText = pool.examples[exampleIndex];
+  if (exampleText === undefined) {
+    throw new Error(`variationPools "${pool.name}" has no examples.`);
+  }
   const variationId = `${pool.name}#${exampleIndex}`;
-  const requestPayload = { text };
   const timestamp = ctx.now();
 
+  // Defense-in-depth re-check (ADR 0002's "one chokepoint isn't trusted
+  // alone" precedent) — Session 2's `validateSoakBlueprint` already checked
+  // this once at blueprint-load time; this re-checks the *actual*
+  // constructed provider's own identity immediately before the call that
+  // matters, catching a mismatch the static blueprint fields alone
+  // wouldn't (e.g. a future `createSoakContentProvider` bug).
+  assertSoakDataPolicyAllowed(ctx.blueprint.dataPolicy, ctx.contentProvider.provider);
+
+  let text: string;
+  try {
+    const variation = await ctx.contentProvider.vary({
+      exampleText,
+      ...(pool.variation !== undefined && { variation: pool.variation }),
+    });
+    text = variation.variedText;
+  } catch (err) {
+    ctx.db.insertTurn({
+      id: newSoakId(),
+      runId: ctx.runId,
+      sequence,
+      lane,
+      variationId,
+      requestPayload: { text: exampleText },
+      explicitError: true,
+      errorDetail: `variation failed: ${err instanceof Error ? err.message : String(err)}`,
+      timestamp,
+    });
+    ctx.counts.dispatched++;
+    ctx.counts.explicitErrors++;
+    return;
+  }
+
+  const requestPayload = { text };
   const headers: Record<string, string> = { "content-type": "application/json" };
   if (ctx.authToken !== undefined) headers.authorization = `Bearer ${ctx.authToken}`;
 
@@ -274,6 +330,7 @@ export async function runSoak(options: RunSoakOptions): Promise<RunSoakResult> {
   const sleep = options.sleep ?? defaultSleep;
   const now = options.now ?? Date.now;
   const random = options.random ?? Math.random;
+  const contentProvider = options.contentProvider ?? createSoakContentProvider(blueprint);
 
   const runId = newSoakId();
   const runStartedAt = now();
@@ -300,6 +357,7 @@ export async function runSoak(options: RunSoakOptions): Promise<RunSoakResult> {
     runStartedAt,
     maxDurationMs: blueprint.maxDurationHours * 60 * 60 * 1000,
     budget,
+    contentProvider,
     fetchImpl,
     sleep,
     now,

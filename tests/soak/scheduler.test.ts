@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { ScriptedSoakContentProvider } from "../../src/soak/content-provider.js";
 import { SoakDb } from "../../src/soak/db.js";
 import { runSoak } from "../../src/soak/scheduler.js";
 import type { SoakBlueprint, SoakTeardownContext } from "../../src/soak/types.js";
@@ -26,6 +27,21 @@ function makeFakeClock(startAt = 0) {
 /** Always selects index 0 — deterministic whenever a pool/example array has exactly one entry, which every test below uses unless it's specifically testing pool/example variety. */
 const ZERO_RANDOM = () => 0;
 
+/**
+ * A `ScriptedSoakContentProvider` that echoes its input text unchanged,
+ * repeated `times` times — Session 3's scheduler tests care about the
+ * scheduler/budget/dispatch mechanics, not variation content, and echoing
+ * lets the fixture's marker-string logic (`SOAK_FIXTURE_FORCE_ERROR_MARKER`
+ * etc.) keep working unchanged once every turn is routed through a content
+ * provider (CTS.md Session 4). Session 4's own tests below assert on real
+ * variation instead of using this helper.
+ */
+function echoProvider(text: string, times = 100): ScriptedSoakContentProvider {
+  return new ScriptedSoakContentProvider(Array(times).fill(text));
+}
+
+const DEFAULT_EXAMPLE_TEXT = "Had a calm day, nothing much to report.";
+
 function makeBlueprint(
   targetBaseUrl: string,
   overrides: Partial<SoakBlueprint> = {},
@@ -42,7 +58,7 @@ function makeBlueprint(
         name: "entry-happy-path",
         lane: "backbone",
         path: "/api/entries",
-        examples: ["Had a calm day, nothing much to report."],
+        examples: [DEFAULT_EXAMPLE_TEXT],
       },
     ],
     pipelineBudgets: [],
@@ -80,6 +96,7 @@ describe("runSoak", () => {
       now: clock.now,
       sleep: clock.sleep,
       random: Math.random,
+      contentProvider: echoProvider(DEFAULT_EXAMPLE_TEXT, 30),
     });
 
     expect(result.status).toBe("completed");
@@ -114,6 +131,7 @@ describe("runSoak", () => {
       now: clock.now,
       sleep: clock.sleep,
       random: ZERO_RANDOM,
+      contentProvider: echoProvider(DEFAULT_EXAMPLE_TEXT),
     });
 
     expect(result.status).toBe("budget-stopped");
@@ -146,6 +164,7 @@ describe("runSoak", () => {
       now: clock.now,
       sleep: clock.sleep,
       random: ZERO_RANDOM,
+      contentProvider: echoProvider(SOAK_FIXTURE_FORCE_ERROR_MARKER),
     });
 
     expect(result.status).toBe("completed");
@@ -181,6 +200,7 @@ describe("runSoak", () => {
       now: clock.now,
       sleep: clock.sleep,
       random: ZERO_RANDOM,
+      contentProvider: echoProvider(SOAK_FIXTURE_FORCE_GATE_MARKER),
     });
 
     expect(result.turnsDispatched).toBe(2);
@@ -209,6 +229,7 @@ describe("runSoak", () => {
       now: clock.now,
       sleep: clock.sleep,
       random: ZERO_RANDOM,
+      contentProvider: echoProvider(DEFAULT_EXAMPLE_TEXT),
     });
 
     expect(result.turnsDispatched).toBe(2);
@@ -236,6 +257,7 @@ describe("runSoak", () => {
       now: clock.now,
       sleep: clock.sleep,
       random: ZERO_RANDOM,
+      contentProvider: echoProvider("Analyze this conversation for tone."),
     });
 
     expect(result.status).toBe("completed");
@@ -265,6 +287,7 @@ describe("runSoak", () => {
       now: clock.now,
       sleep: clock.sleep,
       random: ZERO_RANDOM,
+      contentProvider: echoProvider(DEFAULT_EXAMPLE_TEXT),
     });
 
     expect(teardown).toHaveBeenCalledTimes(1);
@@ -287,10 +310,86 @@ describe("runSoak", () => {
       sleep: clock.sleep,
       random: ZERO_RANDOM,
       authToken: "test-token",
+      contentProvider: echoProvider(DEFAULT_EXAMPLE_TEXT),
     });
 
     expect(fixture.requests).toHaveLength(1);
     expect(fixture.requests[0]?.authorization).toBe("Bearer test-token");
     expect(JSON.stringify(fixture.requests[0]?.body)).not.toContain("test-token");
+  });
+
+  it("dispatches the driver's locally-varied text, not the verbatim example-bank copy (CTS.md Session 4)", async () => {
+    const clock = makeFakeClock();
+    const blueprint = makeBlueprint(fixture.baseUrl, { maxDurationHours: 1000 / 3_600_000 });
+
+    await runSoak({
+      db,
+      blueprint,
+      now: clock.now,
+      sleep: clock.sleep,
+      random: ZERO_RANDOM,
+      contentProvider: new ScriptedSoakContentProvider(["It was a quiet, uneventful day."]),
+    });
+
+    expect(fixture.requests).toHaveLength(1);
+    expect(fixture.requests[0]?.body).toEqual({ text: "It was a quiet, uneventful day." });
+    expect(fixture.requests[0]?.body).not.toEqual({ text: DEFAULT_EXAMPLE_TEXT });
+  });
+
+  it("records a variation failure as an explicit turn error without dispatching HTTP or killing the run", async () => {
+    const clock = makeFakeClock();
+    const blueprint = makeBlueprint(fixture.baseUrl, { maxDurationHours: 2000 / 3_600_000 });
+
+    const result = await runSoak({
+      db,
+      blueprint,
+      now: clock.now,
+      sleep: clock.sleep,
+      random: ZERO_RANDOM,
+      contentProvider: new ScriptedSoakContentProvider([]), // exhausted on the very first call
+    });
+
+    expect(result.status).toBe("completed");
+    expect(result.turnsDispatched).toBe(2);
+    expect(result.explicitErrorCount).toBe(2);
+    expect(fixture.requests).toHaveLength(0); // no HTTP call was ever made
+
+    for (const turn of db.getTurnsByRun(result.runId)) {
+      expect(turn.explicitError).toBe(true);
+      expect(turn.errorDetail).toMatch(/variation failed/);
+      expect(turn.httpStatus).toBeUndefined();
+    }
+  });
+
+  it("crashes the run when the actual content provider's identity violates dataPolicy (defense-in-depth re-check)", async () => {
+    const clock = makeFakeClock();
+    // `driverProvider: "ollama"` satisfies Session 2's blueprint-level check
+    // (validateSoakBlueprint), but the *injected* contentProvider below
+    // reports a different identity — simulating a future createSoakContentProvider
+    // bug or a caller bypassing the factory. The dispatch-site re-check must
+    // still catch this even though the static blueprint fields look fine.
+    const blueprint = makeBlueprint(fixture.baseUrl, {
+      dataPolicy: "restricted",
+      driverProvider: "ollama",
+      maxDurationHours: 1000 / 3_600_000,
+    });
+    const mismatchedProvider = {
+      provider: "anthropic",
+      model: "claude-haiku-4-5",
+      vary: vi.fn(),
+    };
+
+    await expect(
+      runSoak({
+        db,
+        blueprint,
+        now: clock.now,
+        sleep: clock.sleep,
+        random: ZERO_RANDOM,
+        contentProvider: mismatchedProvider,
+      }),
+    ).rejects.toThrow(/does not permit soak driver provider "anthropic"/);
+
+    expect(mismatchedProvider.vary).not.toHaveBeenCalled();
   });
 });
