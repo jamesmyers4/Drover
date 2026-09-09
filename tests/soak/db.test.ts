@@ -12,6 +12,7 @@ const sampleBlueprintConfig: SoakBlueprintConfigSnapshot = {
   version: "2026-09-09.1",
   targetBaseUrl: "https://staging.example.com",
   dataPolicy: "restricted",
+  driverProvider: "ollama",
   driverModel: "llama3.1:8b",
   variationPools: [
     {

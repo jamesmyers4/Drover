@@ -115,6 +115,15 @@ export interface SoakBlueprint {
    * CTS.md's "Notes for whoever picks up the Shenny-side session").
    */
   dataPolicy: SoakDataPolicy;
+  /**
+   * Which driver backend `driverModel` runs on, e.g. "ollama" — mirrors
+   * `ModelRoute.provider`'s loose `string` typing rather than a locked
+   * literal union, so a future second driver provider is a config change
+   * here, not a type change. Added in Session 2 specifically so
+   * `assertSoakDataPolicyAllowed` has a real value to check against; Session
+   * 1's schema didn't yet need it since nothing consumed it.
+   */
+  driverProvider: string;
   /** Local driver model identifier, e.g. "llama3.1:8b" (Ollama). */
   driverModel: string;
   variationPools: VariationPool[];
