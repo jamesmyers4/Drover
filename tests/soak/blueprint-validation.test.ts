@@ -19,7 +19,14 @@ function makeValidBlueprint(overrides: Partial<SoakBlueprint> = {}): SoakBluepri
       {
         name: "entry-happy-path",
         lane: "backbone",
+        path: "/api/entries",
         examples: ["Had a calm day, nothing much to report."],
+      },
+      {
+        name: "message-analysis-standard",
+        lane: "messageAnalysis",
+        path: "/api/message-analysis/analyze",
+        examples: ["Analyze this conversation for tone."],
       },
     ],
     pipelineBudgets: [{ pipeline: "messageAnalysis", maxCallsPerRun: 100 }],
@@ -56,11 +63,56 @@ describe("validateSoakBlueprint", () => {
     const codes = codesOf(() =>
       validateSoakBlueprint(
         makeValidBlueprint({
-          variationPools: [{ name: "empty-pool", lane: "backbone", examples: [] }],
+          variationPools: [
+            { name: "empty-pool", lane: "backbone", path: "/api/entries", examples: [] },
+          ],
         }),
       ),
     );
     expect(codes).toContain("empty-pool-examples");
+  });
+
+  it("rejects a pool with a missing path", () => {
+    const codes = codesOf(() =>
+      validateSoakBlueprint(
+        makeValidBlueprint({
+          variationPools: [
+            {
+              name: "no-path",
+              lane: "backbone",
+              path: "",
+              examples: ["Had a calm day."],
+            },
+          ],
+        }),
+      ),
+    );
+    expect(codes).toContain("invalid-pool-path");
+  });
+
+  it("rejects a pipelineBudgets entry with no matching variationPools lane", () => {
+    const codes = codesOf(() =>
+      validateSoakBlueprint(
+        makeValidBlueprint({
+          pipelineBudgets: [{ pipeline: "recordingReport", maxCallsPerRun: 10 }],
+        }),
+      ),
+    );
+    expect(codes).toContain("unmatched-pipeline-lane");
+  });
+
+  it("rejects an inverted pacingMsRange", () => {
+    const codes = codesOf(() =>
+      validateSoakBlueprint(makeValidBlueprint({ pacingMsRange: { minMs: 60000, maxMs: 5000 } })),
+    );
+    expect(codes).toContain("invalid-pacing-range");
+  });
+
+  it("rejects a negative pacingMsRange", () => {
+    const codes = codesOf(() =>
+      validateSoakBlueprint(makeValidBlueprint({ pacingMsRange: { minMs: -1, maxMs: 100 } })),
+    );
+    expect(codes).toContain("invalid-pacing-range");
   });
 
   it("rejects a negative pipeline budget", () => {

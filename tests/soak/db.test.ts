@@ -18,11 +18,13 @@ const sampleBlueprintConfig: SoakBlueprintConfigSnapshot = {
     {
       name: "entry-happy-path",
       lane: "backbone",
+      path: "/api/entries",
       examples: ["Had a calm day, nothing much to report."],
     },
     {
       name: "messageAnalysis",
       lane: "messageAnalysis",
+      path: "/api/message-analysis/analyze",
       examples: ["Analyze this conversation for tone."],
     },
   ],

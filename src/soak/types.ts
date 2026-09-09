@@ -47,6 +47,18 @@ export interface VariationPool {
   /** Bucket name — referenced by `TurnRecord.variationId` once Session 3 assigns per-turn ids. */
   name: string;
   lane: "backbone" | string;
+  /**
+   * Path (resolved against `SoakBlueprint.targetBaseUrl`) this pool's turns
+   * are dispatched to — added in Session 3 once real HTTP dispatch needed
+   * somewhere concrete to send a request; Sessions 1-2's schema didn't yet
+   * need it. The scheduler POSTs a fixed `{ text: <varied example> }` JSON
+   * envelope (see `scheduler.ts`) — a deliberately fixed v1 wire shape, not
+   * a pluggable request-builder; revisit if a real target's blueprint (built
+   * in that target's own repo, per ADR 0010) needs a different body shape.
+   */
+  path: string;
+  /** @default "POST" */
+  method?: string;
   examples: string[];
   variation?: VariationParams;
 }
@@ -75,6 +87,16 @@ export interface PipelineBudget {
  */
 export interface SoakBudgetConfig {
   ceilingUsd: number;
+  /**
+   * Flat per-turn cost estimate (USD), used when a turn's response doesn't
+   * report a real cost figure via the `x-soak-cost-usd` response header (see
+   * `SOAK_COST_HEADER`, `scheduler.ts`) — needed for a toy/non-billed
+   * fixture target to exercise the budget ceiling at all (CTS.md Session 3:
+   * "tracked from real response cost where the target reports it, or a
+   * configured per-call cost estimate"). Unset means $0 per turn when no
+   * cost header is present — no artificial spend is invented.
+   */
+  costPerCallUsd?: number;
 }
 
 /**

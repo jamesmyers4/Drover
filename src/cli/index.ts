@@ -19,7 +19,8 @@ import type { GraderPack } from "../grader/types.js";
 import { loadDefaultExport } from "../orchestrator/config-loader.js";
 import { runDiscovery } from "../orchestrator/run-discovery.js";
 import { buildRunReport, renderMarkdownReport } from "../report/index.js";
-import { validateSoakBlueprint } from "../soak/blueprint-validation.js";
+import { SoakDb } from "../soak/db.js";
+import { runSoak } from "../soak/scheduler.js";
 import type { SoakBlueprint } from "../soak/types.js";
 import {
   DEFAULT_CONCURRENCY_LEVELS,
@@ -242,13 +243,13 @@ async function gradeCommand(packPath: string, options: { db?: string }): Promise
 }
 
 /**
- * `drover soak run <blueprint> [--db path]` (CTS.md Soak Session 2). Loads
- * and statically validates a `SoakBlueprint` — same "fail before spending"
- * discipline `gradeCommand`/`validateGraderPack` already established for
- * Grader. Does not yet dispatch any turns (CTS.md Soak Session 3); `--db` is
- * accepted now for forward compatibility but not opened or written, mirroring
- * how `gradeCommand`'s own `--db` flag started out in Grader Session 2 before
- * Session 3 wired real persistence behind it.
+ * `drover soak run <blueprint> [--db path]` (CTS.md Soak Session 2, wired
+ * for real in Session 3 — closing Session 2's own "not yet opened or
+ * written" breadcrumb, same precedent Grader Session 3 set for `drover
+ * grade`'s `--db` flag). `runSoak` (`scheduler.ts`) validates the blueprint
+ * internally before inserting any `soak_runs` row, so a malformed blueprint
+ * never leaves a "crashed" row behind for a run that never actually started
+ * — same guarantee `runGradingRun` already established for Grader.
  *
  * `--db` defaults to a single, stable `soak.sqlite` in the current directory
  * — the same "reused across invocations, not a fresh timestamped file per
@@ -257,23 +258,42 @@ async function gradeCommand(packPath: string, options: { db?: string }): Promise
  * Grader Session 3 had to relearn it (see that session's status note on
  * `runs/hhops-drover-container-1/2/3.sqlite`'s cross-run-reconciliation
  * fragmentation).
+ *
+ * The bearer token for HTTP dispatch is read from `SOAK_AUTH_TOKEN` here,
+ * at the CLI boundary, and passed through as a `runSoak` option — never
+ * placed on the blueprint itself, since `SoakBlueprint` gets persisted
+ * (minus `teardown`) into `soak_runs.blueprint_config_json` and a secret
+ * has no business entering that snapshot (the same "secrets stay in the
+ * orchestrator's HTTP layer only" discipline `DomainPack.auth` already
+ * follows for the simulation stack).
  */
 async function soakRunCommand(blueprintPath: string, options: { db?: string }): Promise<void> {
   await registerTsLoader();
 
   const blueprint = await loadDefaultExport<SoakBlueprint>(blueprintPath, "SoakBlueprint");
   const dbPath = options.db ?? "soak.sqlite";
+  mkdirSync(path.dirname(dbPath) || ".", { recursive: true });
 
   console.log(`Soak blueprint "${blueprint.appName}" v${blueprint.version}`);
   console.log(`  dataPolicy: ${blueprint.dataPolicy}`);
   console.log(`  driver:     ${blueprint.driverProvider}/${blueprint.driverModel}`);
   console.log(`  target:     ${blueprint.targetBaseUrl}`);
-  console.log(
-    `  db:         ${dbPath} (not yet opened — turn execution lands in CTS.md Session 3)\n`,
-  );
+  console.log(`  budget:     $${blueprint.budget.ceilingUsd} run ceiling`);
+  console.log(`  db:         ${dbPath}\n`);
 
-  validateSoakBlueprint(blueprint);
-  console.log("Blueprint is valid.");
+  const db = new SoakDb(dbPath);
+  try {
+    const authToken = process.env.SOAK_AUTH_TOKEN;
+    const result = await runSoak({ db, blueprint, ...(authToken !== undefined && { authToken }) });
+    console.log(`Soak run ${result.runId}: ${result.status}`);
+    console.log(`  turns dispatched:  ${result.turnsDispatched}`);
+    console.log(`  explicit errors:   ${result.explicitErrorCount}`);
+    console.log(`  gated responses:   ${result.gatedResponseCount}`);
+    console.log(`  total cost:        $${result.spentUsd.toFixed(4)}`);
+    console.log(`  db:                ${dbPath}`);
+  } finally {
+    db.close();
+  }
 }
 
 const program = new Command();
@@ -406,12 +426,12 @@ const soakCommand = program
 soakCommand
   .command("run")
   .description(
-    "Load and validate a SoakBlueprint. Turn execution isn't wired up yet (CTS.md Soak Session 3) — this currently validates only.",
+    "Validate a SoakBlueprint and execute a soak run against it (no local-model text variation yet — CTS.md Soak Session 4).",
   )
   .argument("<blueprint>", "path to a .ts module exporting a SoakBlueprint as its default export")
   .option(
     "-d, --db <path>",
-    "soak.sqlite output file path — reused across invocations by default (default: ./soak.sqlite); accepted now for forward compatibility, not yet opened or written",
+    "soak.sqlite output file path — reused across invocations by default (default: ./soak.sqlite)",
   )
   .action(async (blueprintPath: string, options: { db?: string }) => {
     try {

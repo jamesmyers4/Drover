@@ -15,11 +15,14 @@ import type { SoakBlueprint, SoakDataPolicy } from "./types.js";
 export type SoakBlueprintValidationIssueCode =
   | "empty-variation-pools"
   | "empty-pool-examples"
+  | "invalid-pool-path"
   | "invalid-pipeline-budget"
+  | "unmatched-pipeline-lane"
   | "invalid-budget-ceiling"
   | "invalid-max-duration"
   | "invalid-data-policy"
   | "malformed-target-url"
+  | "invalid-pacing-range"
   | "invalid-driver-provider"
   | "data-policy-violation";
 
@@ -97,7 +100,16 @@ function isWellFormedUrl(value: unknown): boolean {
   }
 }
 
-function validateVariationPools(rawPools: unknown, issues: SoakBlueprintValidationIssue[]): void {
+/**
+ * Validates `variationPools` and returns the set of lanes actually declared
+ * (used by `validateUnmatchedPipelineLanes` below) — `undefined` when the
+ * array itself is malformed, so the caller can skip the cross-check rather
+ * than reporting a confusing second error derived from bad data.
+ */
+function validateVariationPools(
+  rawPools: unknown,
+  issues: SoakBlueprintValidationIssue[],
+): Set<string> | undefined {
   if (!Array.isArray(rawPools) || rawPools.length === 0) {
     issues.push({
       code: "empty-variation-pools",
@@ -105,9 +117,10 @@ function validateVariationPools(rawPools: unknown, issues: SoakBlueprintValidati
         '"variationPools" must be a non-empty array — a soak run has nothing to draw turn ' +
         "content from otherwise.",
     });
-    return;
+    return undefined;
   }
 
+  const lanes = new Set<string>();
   rawPools.forEach((rawPool: unknown, i: number) => {
     if (!isPlainObject(rawPool)) {
       issues.push({
@@ -118,6 +131,8 @@ function validateVariationPools(rawPools: unknown, issues: SoakBlueprintValidati
     }
     const label =
       typeof rawPool.name === "string" && rawPool.name.length > 0 ? `"${rawPool.name}"` : `[${i}]`;
+    if (typeof rawPool.lane === "string" && rawPool.lane.length > 0) lanes.add(rawPool.lane);
+
     const examples = rawPool.examples;
     if (!Array.isArray(examples) || examples.length === 0) {
       issues.push({
@@ -125,7 +140,15 @@ function validateVariationPools(rawPools: unknown, issues: SoakBlueprintValidati
         message: `variationPools ${label} must have at least one Claude-authored example narrative in "examples".`,
       });
     }
+
+    if (typeof rawPool.path !== "string" || rawPool.path.length === 0) {
+      issues.push({
+        code: "invalid-pool-path",
+        message: `variationPools ${label}.path must be a non-empty string — the scheduler has nowhere to dispatch this pool's turns otherwise.`,
+      });
+    }
   });
+  return lanes;
 }
 
 function validatePipelineBudgets(
@@ -160,6 +183,44 @@ function validatePipelineBudgets(
       });
     }
   });
+}
+
+/**
+ * Cross-checks every `pipelineBudgets[*].pipeline` against the lanes
+ * `variationPools` actually declares — a mismatch is a silent, confusing
+ * dead lane at runtime (the scheduler just never dispatches for it) rather
+ * than a loud failure, so it's caught here instead. Only runs when both
+ * halves parsed as well-formed arrays (skipped otherwise, since either
+ * malformed-shape error already reported is a clearer signal on its own).
+ */
+function validateUnmatchedPipelineLanes(
+  rawBudgets: unknown,
+  lanes: Set<string> | undefined,
+  issues: SoakBlueprintValidationIssue[],
+): void {
+  if (!Array.isArray(rawBudgets) || lanes === undefined) return;
+  for (const rawBudget of rawBudgets) {
+    if (!isPlainObject(rawBudget) || typeof rawBudget.pipeline !== "string") continue;
+    if (!lanes.has(rawBudget.pipeline)) {
+      issues.push({
+        code: "unmatched-pipeline-lane",
+        message: `pipelineBudgets references pipeline "${rawBudget.pipeline}", but no variationPools entry declares that lane — this pipeline's lane would silently dispatch nothing.`,
+      });
+    }
+  }
+}
+
+function validatePacingRange(rawValue: unknown, issues: SoakBlueprintValidationIssue[]): void {
+  const minMs = isPlainObject(rawValue) ? rawValue.minMs : undefined;
+  const maxMs = isPlainObject(rawValue) ? rawValue.maxMs : undefined;
+  const validMin = typeof minMs === "number" && Number.isFinite(minMs) && minMs >= 0;
+  const validMax = typeof maxMs === "number" && Number.isFinite(maxMs) && maxMs >= 0;
+  if (!validMin || !validMax || (minMs as number) > (maxMs as number)) {
+    issues.push({
+      code: "invalid-pacing-range",
+      message: `"pacingMsRange" must be { minMs, maxMs } with both non-negative and minMs <= maxMs, got ${JSON.stringify(rawValue)}.`,
+    });
+  }
 }
 
 function validateBudget(rawBudget: unknown, issues: SoakBlueprintValidationIssue[]): void {
@@ -221,12 +282,14 @@ function validateDriverProvider(rawValue: unknown, issues: SoakBlueprintValidati
 export function validateSoakBlueprint(blueprint: SoakBlueprint): void {
   const issues: SoakBlueprintValidationIssue[] = [];
 
-  validateVariationPools(blueprint.variationPools, issues);
+  const lanes = validateVariationPools(blueprint.variationPools, issues);
   validatePipelineBudgets(blueprint.pipelineBudgets, issues);
+  validateUnmatchedPipelineLanes(blueprint.pipelineBudgets, lanes, issues);
   validateBudget(blueprint.budget, issues);
   validateMaxDurationHours(blueprint.maxDurationHours, issues);
   validateDataPolicy(blueprint.dataPolicy, issues);
   validateTargetBaseUrl(blueprint.targetBaseUrl, issues);
+  validatePacingRange(blueprint.pacingMsRange, issues);
   validateDriverProvider(blueprint.driverProvider, issues);
 
   const dataPolicyValid =
