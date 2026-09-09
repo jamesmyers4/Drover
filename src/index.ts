@@ -7,6 +7,7 @@ export * from "./grader/index.js";
 export { computeMatchKey, normalizeRoute } from "./matching/match-key.js";
 export * from "./orchestrator/index.js";
 export * from "./report/index.js";
+export * from "./soak/index.js";
 export * from "./stampede/index.js";
 export {
   createTreelineAdapter,
