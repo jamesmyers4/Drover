@@ -74,4 +74,31 @@ export const soakMigrations: Migration[] = [
       CREATE INDEX idx_metrics_run_name ON metrics(run_id, name);
     `,
   },
+  {
+    version: 2,
+    name: "soak-analysis-tables",
+    // CTS.md Session 7: `drover soak analyze` persists both analysis
+    // passes' findings. `grading_run_id` is a soft reference only (no real
+    // FK possible across separate SQLite files) to a Grader `GradingRun.id`
+    // in `grader.sqlite` — overwritten, not accumulated, on each
+    // re-analysis (Drover doesn't track multi-pass Grader history for a
+    // soak run any more than it does for a Discovery run's analyst pass).
+    // No `grader_cost_usd` column: Grader itself doesn't track cost per
+    // Grading Run yet (GAPS.md), so there's nothing real to store there.
+    sql: `
+      ALTER TABLE soak_runs ADD COLUMN grading_run_id TEXT;
+      ALTER TABLE soak_runs ADD COLUMN cross_turn_cost_usd REAL;
+
+      CREATE TABLE cross_turn_findings (
+        id TEXT PRIMARY KEY,
+        run_id TEXT NOT NULL REFERENCES soak_runs(id),
+        type TEXT NOT NULL CHECK (type IN ('disagreement', 'drift', 'recurring-error-cluster', 'timing-anomaly')),
+        severity TEXT NOT NULL CHECK (severity IN ('low', 'medium', 'high', 'critical')),
+        description TEXT NOT NULL,
+        turn_ids_json TEXT NOT NULL,
+        created_at INTEGER NOT NULL
+      );
+      CREATE INDEX idx_cross_turn_findings_run ON cross_turn_findings(run_id);
+    `,
+  },
 ];

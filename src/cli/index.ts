@@ -8,23 +8,26 @@
  * dynamic import happens.
  */
 import "dotenv/config";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { Command } from "commander";
 import { DEFAULT_SESSIONS_PER_CHUNK, runAnalyst } from "../analyst/analyze.js";
 import { DroverDb } from "../db/database.js";
 import { buildGraderCiSummary } from "../grader/ci-summary.js";
 import { GraderDb } from "../grader/db.js";
-import type { GraderModelRouting } from "../grader/grade.js";
 import { runGrading } from "../grader/grade.js";
-import { DEFAULT_GRADER_OLLAMA_MODEL, DEFAULT_HOSTED_GRADER_MODEL } from "../grader/provider.js";
 import { buildGradingReport } from "../grader/report.js";
 import { renderGradingReportMarkdown } from "../grader/report-markdown.js";
+import { defaultGraderRouting } from "../grader/routing.js";
 import type { GraderPack } from "../grader/types.js";
 import { loadDefaultExport } from "../orchestrator/config-loader.js";
 import { runDiscovery } from "../orchestrator/run-discovery.js";
 import { buildRunReport, renderMarkdownReport } from "../report/index.js";
+import { runSoakAnalysis } from "../soak/analyze.js";
 import { SoakDb } from "../soak/db.js";
+import { DEFAULT_TURNS_PER_CHUNK } from "../soak/digest.js";
+import { buildSoakReport } from "../soak/report.js";
+import { renderSoakReportMarkdown } from "../soak/report-markdown.js";
 import { runSoak } from "../soak/scheduler.js";
 import type { SoakBlueprint } from "../soak/types.js";
 import {
@@ -236,53 +239,6 @@ async function stampedeCommand(
  * CI workflow makes that call itself by parsing `--json`'s output, not by
  * reading this tool's exit code as a proxy for it.
  */
-/**
- * Default `GraderModelRouting` for a bare `drover grade` invocation with no
- * routing override. Layers 2-3 always dispatch to the local Ollama model
- * (`DEFAULT_GRADER_OLLAMA_MODEL`) — the "$0 by design" routine-work judge
- * (FUTUREPLAN.md's cost-basis note).
- *
- * Layers 4-7 (multi-judge Consensus Round) need >= 2 distinct-model-family
- * judges plus an escalation route (ADR 0003) — this build environment (like
- * most fresh installs) has only one local model pulled, so the second judge
- * comes from Anthropic instead, *when it's actually usable*: an
- * `ANTHROPIC_API_KEY` is present in the environment, and the pack's own
- * `dataPolicy`/`allowHostedEscalation` would allow a hosted dispatch in the
- * first place (mirrors `assertHostedGraderDispatchAllowed`'s own rule,
- * checked here rather than by catching its throw, so an unusable pack
- * degrades to "just Layers 1-3" the same graceful way as having no second
- * judge at all — never a crashed `drover grade` invocation over the CLI's
- * own default choice). Ollama does the routine per-Case judging (one of the
- * two Consensus votes, alongside Layers 2-3's single-judge work); Anthropic
- * (`DEFAULT_HOSTED_GRADER_MODEL`) supplies the second, independent vote and
- * doubles as the escalation adjudicator — a real second opinion from the
- * paid model specifically when the two disagree, not a per-Case cost.
- * Escalation is the rare path (Q10) — this keeps real dollar spend small by
- * design, matching the "Ollama does the work, Anthropic is a second-stage
- * check" split the user asked for. When neither condition holds, Layers 4-7
- * are left out entirely (a console warning, not an error) — see
- * GAPS.md's 2026-09-09 entries for the fuller history of this gap.
- */
-function defaultGraderRouting(
-  pack: Pick<GraderPack, "dataPolicy" | "allowHostedEscalation">,
-): GraderModelRouting {
-  const ollamaJudge = { provider: "ollama", model: DEFAULT_GRADER_OLLAMA_MODEL };
-  const hostedDispatchAllowed =
-    pack.dataPolicy !== "restricted" || pack.allowHostedEscalation === true;
-  const hasAnthropicKey = Boolean(process.env.ANTHROPIC_API_KEY);
-
-  if (!hostedDispatchAllowed || !hasAnthropicKey) {
-    return { singleJudge: ollamaJudge, consensusJudges: [] };
-  }
-
-  const anthropicJudge = { provider: "anthropic", model: DEFAULT_HOSTED_GRADER_MODEL };
-  return {
-    singleJudge: ollamaJudge,
-    consensusJudges: [ollamaJudge, anthropicJudge],
-    escalation: anthropicJudge,
-  };
-}
-
 async function gradeCommand(
   packPath: string,
   options: { db?: string; report?: string; json?: string | boolean },
@@ -397,6 +353,117 @@ async function soakRunCommand(blueprintPath: string, options: { db?: string }): 
     console.log(`  total cost:        $${result.spentUsd.toFixed(4)}`);
     console.log(`  db:                ${dbPath}`);
   } finally {
+    db.close();
+  }
+}
+
+/**
+ * `drover soak analyze <run-id> --db <path> [--blueprint <path>] [--grader-db <path>]`
+ * (CTS.md Soak Session 7). Always runs the cross-turn pass (Session 6) —
+ * needs nothing but this run's own turns. The Grader-Case pass (Session 5)
+ * only runs when `--blueprint` is given AND that blueprint configures
+ * `graderIntegration` (ADR 0010: a generic `drover soak analyze` invocation
+ * has no target-specific rubrics of its own to fall back to) — `--blueprint`
+ * is required for this half specifically because `graderIntegration`'s
+ * `rubricKeyFor`/`contextFor` are live functions, never persisted into
+ * `soak_runs`' own stored snapshot (see `SoakBlueprintConfigSnapshot`'s doc
+ * comment), so the original blueprint file must be reloaded fresh — same as
+ * `drover soak run` does.
+ */
+async function soakAnalyzeCommand(
+  runId: string,
+  options: { db: string; blueprint?: string; graderDb?: string; turnsPerChunk?: string },
+): Promise<void> {
+  await registerTsLoader();
+
+  const db = new SoakDb(options.db);
+  let graderDb: GraderDb | undefined;
+  try {
+    let blueprint: SoakBlueprint | undefined;
+    if (options.blueprint) {
+      blueprint = await loadDefaultExport<SoakBlueprint>(options.blueprint, "SoakBlueprint");
+    }
+
+    console.log(`Analyzing soak run ${runId}`);
+    console.log(`  db:        ${options.db}`);
+    if (blueprint) {
+      console.log(
+        `  blueprint: ${options.blueprint} (graderIntegration: ${blueprint.graderIntegration ? "configured" : "none"})`,
+      );
+    }
+
+    let graderDbPath: string | undefined;
+    if (blueprint?.graderIntegration) {
+      graderDbPath = options.graderDb ?? "grader.sqlite";
+      mkdirSync(path.dirname(graderDbPath) || ".", { recursive: true });
+      graderDb = new GraderDb(graderDbPath);
+      console.log(`  grader db: ${graderDbPath}`);
+    }
+    console.log("");
+
+    const result = await runSoakAnalysis({
+      db,
+      runId,
+      ...(blueprint !== undefined && { blueprint }),
+      ...(graderDb !== undefined && { graderDb }),
+      ...(options.turnsPerChunk !== undefined && {
+        turnsPerChunk: Number(options.turnsPerChunk),
+      }),
+    });
+
+    console.log(`Turns analyzed:           ${result.turnsAnalyzed}`);
+    console.log(
+      `Cross-turn findings:      ${result.crossTurnFindingsWritten} written, ${result.crossTurnFindingsSkipped} skipped`,
+    );
+    console.log(`Cross-turn analysis cost: $${result.crossTurnCostUsd.toFixed(4)}`);
+    if (result.grader) {
+      console.log(`Grader pass: grading run ${result.grader.gradingRunId}`);
+      console.log(`  cases processed: ${result.grader.casesProcessed}`);
+      console.log(`  tasks passed:    ${result.grader.tasksPassed}`);
+      console.log(`  tasks failed:    ${result.grader.tasksFailed}`);
+      console.log(`  tasks skipped:   ${result.grader.tasksSkipped}`);
+    } else if (result.graderSkippedReason) {
+      console.log(`Grader pass skipped: ${result.graderSkippedReason}`);
+    }
+  } finally {
+    graderDb?.close();
+    db.close();
+  }
+}
+
+/**
+ * `drover soak report <run-id> --db <path> [--grader-db <path>] [--out <path>]`
+ * (CTS.md Soak Session 7) — reads only already-persisted data (`soak.sqlite`
+ * always; `grader.sqlite` too, but only if this run actually has a linked
+ * `gradingRunId` and that file already exists — a report command must never
+ * create a new database file as a side effect of running it).
+ */
+async function soakReportCommand(
+  runId: string,
+  options: { db: string; graderDb?: string; out?: string },
+): Promise<void> {
+  const db = new SoakDb(options.db);
+  let graderDb: GraderDb | undefined;
+  try {
+    const run = db.getSoakRun(runId);
+    if (run?.gradingRunId !== undefined) {
+      const graderDbPath = options.graderDb ?? "grader.sqlite";
+      if (existsSync(graderDbPath)) {
+        graderDb = new GraderDb(graderDbPath);
+      }
+    }
+
+    const report = buildSoakReport(db, runId, graderDb);
+    const markdown = renderSoakReportMarkdown(report);
+    if (options.out) {
+      mkdirSync(path.dirname(options.out) || ".", { recursive: true });
+      writeFileSync(options.out, markdown);
+      console.log(`Soak report written to ${options.out}`);
+    } else {
+      console.log(markdown);
+    }
+  } finally {
+    graderDb?.close();
     db.close();
   }
 }
@@ -543,9 +610,7 @@ const soakCommand = program
 
 soakCommand
   .command("run")
-  .description(
-    "Validate a SoakBlueprint and execute a soak run against it (no local-model text variation yet — CTS.md Soak Session 4).",
-  )
+  .description("Validate a SoakBlueprint and execute a soak run against it.")
   .argument("<blueprint>", "path to a .ts module exporting a SoakBlueprint as its default export")
   .option(
     "-d, --db <path>",
@@ -554,6 +619,65 @@ soakCommand
   .action(async (blueprintPath: string, options: { db?: string }) => {
     try {
       await soakRunCommand(blueprintPath, options);
+    } catch (err) {
+      console.error(err instanceof Error ? err.message : err);
+      process.exitCode = 1;
+    }
+  });
+
+soakCommand
+  .command("analyze")
+  .description(
+    "Run the cross-turn pattern-mining pass (and, with --blueprint, Grader-sourced single-turn findings) on a completed soak run.",
+  )
+  .argument("<run-id>", "id of a previously completed soak run")
+  .requiredOption(
+    "-d, --db <path>",
+    "path to the run's soak.sqlite file (the --db path from `drover soak run`)",
+  )
+  .option(
+    "-b, --blueprint <path>",
+    "path to the .ts SoakBlueprint module this run executed against — required to enable Grader-sourced findings (only used if the blueprint configures graderIntegration)",
+  )
+  .option(
+    "--grader-db <path>",
+    "grader.sqlite output file path for the Grader pass — reused across invocations by default (default: ./grader.sqlite); only relevant with --blueprint",
+  )
+  .option(
+    "--turns-per-chunk <n>",
+    "max turns per cross-turn analysis request — splits a large run across multiple concurrent requests",
+    String(DEFAULT_TURNS_PER_CHUNK),
+  )
+  .action(
+    async (
+      runId: string,
+      options: { db: string; blueprint?: string; graderDb?: string; turnsPerChunk?: string },
+    ) => {
+      try {
+        await soakAnalyzeCommand(runId, options);
+      } catch (err) {
+        console.error(err instanceof Error ? err.message : err);
+        process.exitCode = 1;
+      }
+    },
+  );
+
+soakCommand
+  .command("report")
+  .description("Generate a markdown findings report for a completed soak run.")
+  .argument("<run-id>", "id of a previously run/analyzed soak run")
+  .requiredOption(
+    "-d, --db <path>",
+    "path to the run's soak.sqlite file (the --db path from `drover soak run`)",
+  )
+  .option(
+    "--grader-db <path>",
+    "grader.sqlite file to read a linked Grader pass from (default: ./grader.sqlite; skipped entirely if it doesn't exist)",
+  )
+  .option("-o, --out <path>", "write the report to this file instead of printing it to stdout")
+  .action(async (runId: string, options: { db: string; graderDb?: string; out?: string }) => {
+    try {
+      await soakReportCommand(runId, options);
     } catch (err) {
       console.error(err instanceof Error ? err.message : err);
       process.exitCode = 1;

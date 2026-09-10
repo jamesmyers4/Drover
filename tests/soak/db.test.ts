@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { newSoakId, SoakDb } from "../../src/soak/db.js";
 import type {
+  CrossTurnFindingRecord,
   MetricRecord,
   SoakBlueprintConfigSnapshot,
   SoakRun,
@@ -77,6 +78,22 @@ function makeMetric(runId: string, overrides: Partial<MetricRecord> = {}): Metri
   };
 }
 
+function makeCrossTurnFinding(
+  runId: string,
+  overrides: Partial<CrossTurnFindingRecord> = {},
+): CrossTurnFindingRecord {
+  return {
+    id: newSoakId(),
+    runId,
+    type: "disagreement",
+    severity: "high",
+    description: "Two turns disagree about the same synthetic record.",
+    turnIds: ["turn-a", "turn-b"],
+    createdAt: Date.now(),
+    ...overrides,
+  };
+}
+
 describe("SoakDb", () => {
   let db: SoakDb;
 
@@ -125,6 +142,37 @@ describe("SoakDb", () => {
     db.insertSoakRun(run);
     db.updateSoakRunSpend(run.id, 4.5);
     expect(db.getSoakRun(run.id)?.spentUsd).toBe(4.5);
+  });
+
+  it("updateSoakRunGradingRunId links a Grader GradingRun id", () => {
+    const run = makeSoakRun();
+    db.insertSoakRun(run);
+    db.updateSoakRunGradingRunId(run.id, "grading-run-1");
+    expect(db.getSoakRun(run.id)?.gradingRunId).toBe("grading-run-1");
+  });
+
+  it("updateSoakRunGradingRunId overwrites rather than accumulates", () => {
+    const run = makeSoakRun();
+    db.insertSoakRun(run);
+    db.updateSoakRunGradingRunId(run.id, "grading-run-1");
+    db.updateSoakRunGradingRunId(run.id, "grading-run-2");
+    expect(db.getSoakRun(run.id)?.gradingRunId).toBe("grading-run-2");
+  });
+
+  it("updateSoakRunCrossTurnCost accumulates across calls", () => {
+    const run = makeSoakRun();
+    db.insertSoakRun(run);
+    db.updateSoakRunCrossTurnCost(run.id, 0.01);
+    db.updateSoakRunCrossTurnCost(run.id, 0.02);
+    expect(db.getSoakRun(run.id)?.crossTurnCostUsd).toBeCloseTo(0.03, 10);
+  });
+
+  it("a fresh run has no gradingRunId or crossTurnCostUsd", () => {
+    const run = makeSoakRun();
+    db.insertSoakRun(run);
+    const stored = db.getSoakRun(run.id);
+    expect(stored?.gradingRunId).toBeUndefined();
+    expect(stored?.crossTurnCostUsd).toBeUndefined();
   });
 
   it("round-trips a backbone turn with a full response", () => {
@@ -206,5 +254,47 @@ describe("SoakDb", () => {
     db.insertMetric(p95);
     expect(db.getMetricsByRun(run.id, "backbone.responseTimeMs.p50")).toEqual([p50]);
     expect(db.getMetricsByRun(run.id)).toHaveLength(2);
+  });
+
+  it("round-trips a cross-turn finding", () => {
+    const run = makeSoakRun();
+    db.insertSoakRun(run);
+    const finding = makeCrossTurnFinding(run.id);
+    db.insertCrossTurnFinding(finding);
+    expect(db.getCrossTurnFindingsByRun(run.id)).toEqual([finding]);
+  });
+
+  it("round-trips a timing-anomaly finding (no LLM-derived counterpart)", () => {
+    const run = makeSoakRun();
+    db.insertSoakRun(run);
+    const finding = makeCrossTurnFinding(run.id, {
+      type: "timing-anomaly",
+      severity: "medium",
+      description: 'Lane "backbone" shows a long response-time tail.',
+      turnIds: ["slow-1"],
+    });
+    db.insertCrossTurnFinding(finding);
+    expect(db.getCrossTurnFindingsByRun(run.id)).toEqual([finding]);
+  });
+
+  it("getCrossTurnFindingsByRun scopes to the given run and orders by created_at", () => {
+    const runA = makeSoakRun();
+    const runB = makeSoakRun();
+    db.insertSoakRun(runA);
+    db.insertSoakRun(runB);
+    const f1 = makeCrossTurnFinding(runA.id, { createdAt: 1000 });
+    const f2 = makeCrossTurnFinding(runA.id, { createdAt: 2000 });
+    const fOther = makeCrossTurnFinding(runB.id);
+    db.insertCrossTurnFinding(f2);
+    db.insertCrossTurnFinding(f1);
+    db.insertCrossTurnFinding(fOther);
+
+    expect(db.getCrossTurnFindingsByRun(runA.id).map((f) => f.id)).toEqual([f1.id, f2.id]);
+  });
+
+  it("getCrossTurnFindingsByRun returns an empty array for a run with none", () => {
+    const run = makeSoakRun();
+    db.insertSoakRun(run);
+    expect(db.getCrossTurnFindingsByRun(run.id)).toEqual([]);
   });
 });

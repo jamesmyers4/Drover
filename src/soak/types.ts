@@ -12,6 +12,7 @@
  * simulation stack's own key decisions.
  */
 
+import type { LayerConfig, Rubric } from "../grader/types.js";
 import type { FindingSeverity } from "../types/index.js";
 
 export type SoakDataPolicy = "synthetic-only" | "restricted";
@@ -157,15 +158,53 @@ export interface SoakBlueprint {
   budget: SoakBudgetConfig;
   maxDurationHours: number;
   teardown?: (ctx: SoakTeardownContext) => Promise<void>;
+  /**
+   * Optional Grader integration (CTS.md Soak Session 7) — the seam that lets
+   * `drover soak analyze` feed this run's turns into Grader as `Case`s
+   * without Drover's generic engine needing to know this target's actual
+   * rubric content (ADR 0010). Absent means the Grader-Case pass is simply
+   * skipped for this blueprint; only the cross-turn pass runs. A real
+   * target's `graderIntegration` (rubric wording, `rubricKeyFor` mapping)
+   * lives in that target's own blueprint file, per ADR 0010 — same boundary
+   * FUTUREPLAN.md already drew for `GraderPack` generally.
+   */
+  graderIntegration?: SoakGraderIntegration;
+}
+
+/**
+ * Optional Grader integration config on a `SoakBlueprint` — see that field's
+ * own doc comment. `rubricKeyFor`/`contextFor` are the caller-supplied
+ * functions `turnToCase` (`grader-adapter.ts`) needs; `rubrics`/`layers`/
+ * `allowHostedEscalation`/`graderCeilingUsd` mirror the corresponding
+ * `GraderPack` fields directly (re-declared here rather than embedding a
+ * full `GraderPack`, since `GraderPack.loadCases` can't be authored in
+ * advance — it needs live turn data from a specific completed run, only
+ * available at `drover soak analyze` time).
+ */
+export interface SoakGraderIntegration {
+  rubrics: Record<string, Rubric>;
+  /** Supplied by the caller (the target's own blueprint) — the seam that keeps target-specific rubric-selection knowledge out of Drover's repo (ADR 0010). */
+  rubricKeyFor: (turn: TurnRecord) => string;
+  /** Optional per-turn context for a groundedness check (Layer 5) — see `turnToCase`'s own `context` parameter. */
+  contextFor?: (turn: TurnRecord) => unknown;
+  layers?: LayerConfig;
+  allowHostedEscalation?: boolean;
+  graderCeilingUsd?: number;
 }
 
 /**
  * Data-only snapshot of a SoakBlueprint, persisted onto its SoakRun —
  * `teardown` is a function and isn't serializable, so it's deliberately
  * excluded, mirroring `Run.config`'s/`GraderPackConfigSnapshot`'s role for
- * the other two subsystems.
+ * the other two subsystems. `graderIntegration` is excluded too: it carries
+ * its own non-serializable functions (`rubricKeyFor`/`contextFor`), and
+ * `drover soak analyze` always re-reads it fresh from the original blueprint
+ * file (same as `drover soak run` does) rather than from this snapshot —
+ * storing a half-empty object here (functions silently dropped by
+ * `JSON.stringify`, `rubrics`/`layers` surviving) would be misleading to
+ * read back later.
  */
-export type SoakBlueprintConfigSnapshot = Omit<SoakBlueprint, "teardown">;
+export type SoakBlueprintConfigSnapshot = Omit<SoakBlueprint, "teardown" | "graderIntegration">;
 
 /**
  * One top-level invocation of Soak mode against a SoakBlueprint. Its own
@@ -196,6 +235,22 @@ export interface SoakRun {
   /** Raw epoch milliseconds. */
   startedAt: number;
   endedAt?: number;
+  /**
+   * The most recent Grader `GradingRun.id` (in `grader.sqlite`, a fully
+   * separate file — no real FK possible across SQLite files) produced by
+   * `drover soak analyze` grading this run's turns, if `graderIntegration`
+   * was configured (CTS.md Session 7). Overwritten, not accumulated, on each
+   * re-analysis — Drover doesn't track multi-pass Grader history for a soak
+   * run any more than it does for a Discovery run's own analyst pass.
+   */
+  gradingRunId?: string;
+  /**
+   * Cumulative cross-turn-pass spend across every `drover soak analyze`
+   * invocation for this run — mirrors `Run.analystCostUsd`'s additive
+   * precedent (a run can be re-analyzed, each pass billing real additional
+   * cost). Absent until the first `drover soak analyze` completes.
+   */
+  crossTurnCostUsd?: number;
 }
 
 /** Which of the scheduler's two lanes a turn belongs to (see "Backbone traffic") — `"backbone"` or a metered pipeline's own name. */
@@ -262,10 +317,12 @@ export type CrossTurnFindingType =
 
 /**
  * One cross-turn pattern finding — the soak-mode analogue of
- * `CrossSessionFinding`, in-memory only as of Session 6 (no persistence/
- * match-key yet; that's Session 7's `drover soak analyze` job, per CTS.md).
- * Reuses the project-wide `FindingSeverity` vocabulary rather than a fourth
- * severity enum.
+ * `CrossSessionFinding`. Produced in-memory by `runCrossTurnAnalysis`
+ * (Session 6); persisted as a `CrossTurnFindingRecord` by `drover soak
+ * analyze` (Session 7). Reuses the project-wide `FindingSeverity` vocabulary
+ * rather than a fourth severity enum. No match-key yet (unlike
+ * `CrossSessionFinding`) — cross-run reconciliation for soak findings isn't
+ * in scope for this build.
  */
 export interface CrossTurnFinding {
   type: CrossTurnFindingType;
@@ -273,4 +330,12 @@ export interface CrossTurnFinding {
   description: string;
   /** The turn ids (from the digests this pass was given) exhibiting this pattern. */
   turnIds: string[];
+}
+
+/** A persisted `CrossTurnFinding` — adds the fields only known once it's actually written to `soak.sqlite` (CTS.md Session 7). */
+export interface CrossTurnFindingRecord extends CrossTurnFinding {
+  id: string;
+  runId: string;
+  /** Raw epoch milliseconds. */
+  createdAt: number;
 }

@@ -10,8 +10,11 @@
 
 import { randomUUID } from "node:crypto";
 import { SqliteStore } from "../db/sqlite-store.js";
+import type { FindingSeverity } from "../types/index.js";
 import { soakMigrations } from "./migrations.js";
 import type {
+  CrossTurnFindingRecord,
+  CrossTurnFindingType,
   MetricRecord,
   SoakBlueprintConfigSnapshot,
   SoakRun,
@@ -67,6 +70,20 @@ export class SoakDb extends SqliteStore {
     this.db.prepare("UPDATE soak_runs SET spent_usd = ? WHERE id = ?").run(spentUsd, id);
   }
 
+  /** Overwrites the linked Grader `GradingRun.id` (`grader.sqlite`) — the most recent `drover soak analyze` invocation's Grader pass, not an accumulated history (CTS.md Session 7). */
+  updateSoakRunGradingRunId(id: string, gradingRunId: string): void {
+    this.db.prepare("UPDATE soak_runs SET grading_run_id = ? WHERE id = ?").run(gradingRunId, id);
+  }
+
+  /** Adds to the cumulative cross-turn-pass spend — a run can be re-analyzed via multiple `drover soak analyze` invocations, each billing real additional cost (mirrors `DroverDb.updateRunAnalystCost`'s COALESCE-add precedent). */
+  updateSoakRunCrossTurnCost(id: string, costUsd: number): void {
+    this.db
+      .prepare(
+        "UPDATE soak_runs SET cross_turn_cost_usd = COALESCE(cross_turn_cost_usd, 0) + ? WHERE id = ?",
+      )
+      .run(costUsd, id);
+  }
+
   private mapSoakRunRow(row: {
     id: string;
     app_name: string;
@@ -79,6 +96,8 @@ export class SoakDb extends SqliteStore {
     spent_usd: number;
     started_at: number;
     ended_at: number | null;
+    grading_run_id: string | null;
+    cross_turn_cost_usd: number | null;
   }): SoakRun {
     return {
       id: row.id,
@@ -92,6 +111,8 @@ export class SoakDb extends SqliteStore {
       spentUsd: row.spent_usd,
       startedAt: row.started_at,
       ...(row.ended_at !== null && { endedAt: row.ended_at }),
+      ...(row.grading_run_id !== null && { gradingRunId: row.grading_run_id }),
+      ...(row.cross_turn_cost_usd !== null && { crossTurnCostUsd: row.cross_turn_cost_usd }),
     };
   }
 
@@ -109,6 +130,8 @@ export class SoakDb extends SqliteStore {
           spent_usd: number;
           started_at: number;
           ended_at: number | null;
+          grading_run_id: string | null;
+          cross_turn_cost_usd: number | null;
         }
       | undefined;
     return row ? this.mapSoakRunRow(row) : undefined;
@@ -260,5 +283,60 @@ export class SoakDb extends SqliteStore {
           recorded_at: number;
         }[]);
     return rows.map((row) => this.mapMetricRow(row));
+  }
+
+  // --- cross-turn findings ---
+
+  insertCrossTurnFinding(finding: CrossTurnFindingRecord): void {
+    this.db
+      .prepare(
+        `INSERT INTO cross_turn_findings (
+          id, run_id, type, severity, description, turn_ids_json, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        finding.id,
+        finding.runId,
+        finding.type,
+        finding.severity,
+        finding.description,
+        JSON.stringify(finding.turnIds),
+        finding.createdAt,
+      );
+  }
+
+  private mapCrossTurnFindingRow(row: {
+    id: string;
+    run_id: string;
+    type: CrossTurnFindingType;
+    severity: FindingSeverity;
+    description: string;
+    turn_ids_json: string;
+    created_at: number;
+  }): CrossTurnFindingRecord {
+    return {
+      id: row.id,
+      runId: row.run_id,
+      type: row.type,
+      severity: row.severity,
+      description: row.description,
+      turnIds: JSON.parse(row.turn_ids_json) as string[],
+      createdAt: row.created_at,
+    };
+  }
+
+  getCrossTurnFindingsByRun(runId: string): CrossTurnFindingRecord[] {
+    const rows = this.db
+      .prepare("SELECT * FROM cross_turn_findings WHERE run_id = ? ORDER BY created_at, rowid")
+      .all(runId) as {
+      id: string;
+      run_id: string;
+      type: CrossTurnFindingType;
+      severity: FindingSeverity;
+      description: string;
+      turn_ids_json: string;
+      created_at: number;
+    }[];
+    return rows.map((row) => this.mapCrossTurnFindingRow(row));
   }
 }

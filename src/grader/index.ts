@@ -63,6 +63,7 @@ export type {
 } from "./report.js";
 export { buildGradingReport, GradingReportRunNotFoundError } from "./report.js";
 export { renderGradingReportMarkdown } from "./report-markdown.js";
+export { defaultGraderRouting } from "./routing.js";
 export { resolveRubric, snapshotRubric, UnknownRubricError } from "./rubric.js";
 export type { RunGradingRunOptions, RunGradingRunResult } from "./scheduler.js";
 export {

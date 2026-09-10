@@ -1,4 +1,10 @@
 export type {
+  RunSoakAnalysisGraderResult,
+  RunSoakAnalysisOptions,
+  RunSoakAnalysisResult,
+} from "./analyze.js";
+export { runSoakAnalysis, SoakRunNotFoundError } from "./analyze.js";
+export type {
   SoakBlueprintValidationIssue,
   SoakBlueprintValidationIssueCode,
 } from "./blueprint-validation.js";
@@ -50,10 +56,14 @@ export { buildTurnDigest, chunkArray, DEFAULT_TURNS_PER_CHUNK } from "./digest.j
 export type { TurnCaseInput } from "./grader-adapter.js";
 export { turnToCase } from "./grader-adapter.js";
 export { soakMigrations } from "./migrations.js";
+export type { ExplicitErrorCluster, SoakReport, TurnVolumeByLane } from "./report.js";
+export { buildSoakReport, SoakReportRunNotFoundError } from "./report.js";
+export { renderSoakReportMarkdown } from "./report-markdown.js";
 export type { RunSoakOptions, RunSoakResult } from "./scheduler.js";
 export { runSoak, SOAK_COST_HEADER } from "./scheduler.js";
 export type {
   CrossTurnFinding,
+  CrossTurnFindingRecord,
   CrossTurnFindingType,
   MetricRecord,
   PipelineBudget,
@@ -61,6 +71,7 @@ export type {
   SoakBlueprintConfigSnapshot,
   SoakBudgetConfig,
   SoakDataPolicy,
+  SoakGraderIntegration,
   SoakRun,
   SoakRunStatus,
   SoakTeardownContext,
