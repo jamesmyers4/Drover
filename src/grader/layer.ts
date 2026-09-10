@@ -8,11 +8,23 @@
  * dependency between the two.
  */
 
+import type { GraderDb } from "./db.js";
 import type { Case, CheckResult, GraderPack, LayerId, RubricSnapshot } from "./types.js";
 
 export interface LayerRunContext {
   gradingCase: Case;
   pack: GraderPack;
+  /**
+   * Grader Session 6 addition — a multi-judge layer (`consensus-layer.ts`)
+   * calls `runConsensusRound` directly, which persists its own judge/
+   * escalation Task rows as it goes (see consensus.ts's own "write as you
+   * go" precedent); it needs `db` to do that. A single-pass layer (Layer 1,
+   * the single-judge layers) ignores this — `dispatchCaseTasks` persists
+   * their one returned `LayerCheckOutcome` itself.
+   */
+  db: GraderDb;
+  /** Injectable clock, threaded through from `dispatchCaseTasks`/`runGradingRun` so a multi-judge layer's Consensus Round timestamps stay consistent with the rest of the run's. */
+  now: () => number;
 }
 
 export interface LayerCheckOutcome {

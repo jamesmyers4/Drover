@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { GraderDb } from "../../../src/grader/db.js";
 import { layer1 } from "../../../src/grader/layers/layer1.js";
 import type { Case, GraderPack } from "../../../src/grader/types.js";
 
@@ -8,6 +9,10 @@ const dummyPack: GraderPack = {
   loadCases: () => [],
   dataPolicy: "synthetic-only",
 };
+
+/** Layer 1 never touches `db`/`now` — a shared in-memory stand-in is enough to satisfy `LayerRunContext`'s shape (Grader Session 6). */
+const db = new GraderDb(":memory:");
+const now = () => 0;
 
 function makeCase(output: unknown): Case {
   return {
@@ -21,7 +26,7 @@ function makeCase(output: unknown): Case {
 }
 
 function run(output: unknown) {
-  return layer1.run({ gradingCase: makeCase(output), pack: dummyPack });
+  return layer1.run({ gradingCase: makeCase(output), pack: dummyPack, db, now });
 }
 
 describe("layer1 (deterministic schema/format checks)", () => {

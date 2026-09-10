@@ -14,7 +14,11 @@ import { Command } from "commander";
 import { DEFAULT_SESSIONS_PER_CHUNK, runAnalyst } from "../analyst/analyze.js";
 import { DroverDb } from "../db/database.js";
 import { GraderDb } from "../grader/db.js";
-import { runGradingRun } from "../grader/scheduler.js";
+import type { GraderModelRouting } from "../grader/grade.js";
+import { runGrading } from "../grader/grade.js";
+import { DEFAULT_GRADER_OLLAMA_MODEL } from "../grader/provider.js";
+import { buildGradingReport } from "../grader/report.js";
+import { renderGradingReportMarkdown } from "../grader/report-markdown.js";
 import type { GraderPack } from "../grader/types.js";
 import { loadDefaultExport } from "../orchestrator/config-loader.js";
 import { runDiscovery } from "../orchestrator/run-discovery.js";
@@ -217,7 +221,29 @@ async function stampedeCommand(
  * there's no "validate-only, nothing persisted" mode to silently fall into
  * by forgetting a flag.
  */
-async function gradeCommand(packPath: string, options: { db?: string }): Promise<void> {
+/**
+ * Default `GraderModelRouting` for a bare `drover grade` invocation with no
+ * routing override: Layers 2-3 dispatch to the local Ollama model
+ * (`DEFAULT_GRADER_OLLAMA_MODEL`); Layers 4-7 have no default judges at all
+ * — `buildLayerRegistry` (Grader Session 6) needs >= 2 distinct-model-family
+ * judges plus an escalation route to enable them, and this build
+ * environment (like most fresh installs) only has one local model pulled.
+ * Rather than fake diversity or fail the whole run, the CLI accepts that
+ * gap and lets `buildLayerRegistry`'s own warning surface it — Layers 4-7
+ * simply don't dispatch until a second distinct judge is actually
+ * available. See GAPS.md's 2026-09-09 entry.
+ */
+function defaultGraderRouting(): GraderModelRouting {
+  return {
+    singleJudge: { provider: "ollama", model: DEFAULT_GRADER_OLLAMA_MODEL },
+    consensusJudges: [],
+  };
+}
+
+async function gradeCommand(
+  packPath: string,
+  options: { db?: string; report?: string },
+): Promise<void> {
   await registerTsLoader();
 
   const pack = await loadDefaultExport<GraderPack>(packPath, "GraderPack");
@@ -231,12 +257,23 @@ async function gradeCommand(packPath: string, options: { db?: string }): Promise
 
   const db = new GraderDb(dbPath);
   try {
-    const result = await runGradingRun({ db, pack });
+    const result = await runGrading({ db, pack, routing: defaultGraderRouting() });
     console.log(`Grading run ${result.gradingRunId}: ${result.status}`);
-    console.log(`  cases processed: ${result.casesProcessed}`);
-    console.log(`  tasks passed:    ${result.tasksPassed}`);
-    console.log(`  tasks failed:    ${result.tasksFailed}`);
-    console.log(`  tasks skipped:   ${result.tasksSkipped}`);
+    console.log(`  cases processed:        ${result.casesProcessed}`);
+    console.log(`  tasks passed:           ${result.tasksPassed}`);
+    console.log(`  tasks failed:           ${result.tasksFailed}`);
+    console.log(`  tasks skipped:          ${result.tasksSkipped}`);
+    console.log(`  layers 4-7 enabled:     ${result.consensusLayersEnabled.join(", ") || "none"}`);
+
+    const report = buildGradingReport(db, result.gradingRunId);
+    const markdown = renderGradingReportMarkdown(report);
+    if (options.report) {
+      mkdirSync(path.dirname(options.report) || ".", { recursive: true });
+      writeFileSync(options.report, markdown);
+      console.log(`\nGrading report written to ${options.report}`);
+    } else {
+      console.log(`\n${markdown}`);
+    }
   } finally {
     db.close();
   }
@@ -408,7 +445,11 @@ program
     "-d, --db <path>",
     "grader.sqlite output file path — reused across invocations by default (default: ./grader.sqlite); pass a different path for a scratch run or CI-specific output",
   )
-  .action(async (packPath: string, options: { db?: string }) => {
+  .option(
+    "-r, --report <path>",
+    "write the Grading report to this file instead of printing it to stdout",
+  )
+  .action(async (packPath: string, options: { db?: string; report?: string }) => {
     try {
       await gradeCommand(packPath, options);
     } catch (err) {

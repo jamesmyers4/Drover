@@ -200,8 +200,8 @@ export function assertHostedGraderDispatchAllowed(
   }
 }
 
-/** Local/self-hosted default judge model — swap for whatever's actually installed; no name is locked in (FUTUREPLAN.md §3). */
-export const DEFAULT_GRADER_OLLAMA_MODEL = "qwen2.5";
+/** Local/self-hosted default judge model — swap for whatever's actually installed; no name is locked in (FUTUREPLAN.md §3). Set to `qwen3:8b` as of Grader Session 6, the model actually pulled in this build environment (GAPS.md's 2026-09-09 entry). */
+export const DEFAULT_GRADER_OLLAMA_MODEL = "qwen3:8b";
 /** Matches Ollama's own `OLLAMA_HOST` convention, same default `src/actor/provider.ts` uses. */
 export const DEFAULT_GRADER_OLLAMA_BASE_URL = "http://localhost:11434";
 

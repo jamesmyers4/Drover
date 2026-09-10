@@ -89,7 +89,16 @@ export function assertEscalationDispatchAllowed(
   assertHostedGraderDispatchAllowed(pack);
 }
 
-/** Grows as later sessions add real layer implementations (Session 4: layers 2-3, Session 6: 4-7). */
+/**
+ * Deliberately stays layer-1-only: Layers 2-7 all need real
+ * `GraderModelProvider` instances (Session 4's single-judge layers, Session
+ * 6's multi-judge Consensus layers), which need a `ModelRoute`/pack's
+ * `dataPolicy` to construct — nothing this constant-level default can decide
+ * on its own. `grade.ts`'s `runGrading` is the entry point that actually
+ * builds a full 1-7 registry against real providers; tests exercise 2-7 via
+ * an explicit registry passed to `RunGradingRunOptions.layers`, same
+ * precedent Sessions 4-5 already established.
+ */
 export const DEFAULT_LAYER_REGISTRY: LayerRegistry = { 1: layer1 };
 
 /**
@@ -210,7 +219,7 @@ async function dispatchCaseTasks(
     // caught throw exactly as it would from an ordinary fail.
     let outcome: LayerCheckOutcome;
     try {
-      outcome = await impl.run({ gradingCase, pack });
+      outcome = await impl.run({ gradingCase, pack, db, now });
     } catch (err) {
       outcome = {
         status: "fail",

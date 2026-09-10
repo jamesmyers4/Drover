@@ -6,16 +6,23 @@ export {
   runConsensusRound,
 } from "./consensus.js";
 export { GraderDb, newGraderId } from "./db.js";
+export type { GraderModelRouting, RunGradingOptions, RunGradingResult } from "./grade.js";
+export { buildLayerRegistry, runGrading } from "./grade.js";
 export type {
   LayerCheckOutcome,
   LayerImplementation,
   LayerRegistry,
   LayerRunContext,
 } from "./layer.js";
+export { createMultiJudgeLayer } from "./layers/consensus-layer.js";
 export { checkPasses, createSingleJudgeLayer } from "./layers/judge-layer.js";
 export { layer1 } from "./layers/layer1.js";
 export { createLayer2 } from "./layers/layer2.js";
 export { createLayer3 } from "./layers/layer3.js";
+export { createLayer4 } from "./layers/layer4.js";
+export { createLayer5 } from "./layers/layer5.js";
+export { createLayer6 } from "./layers/layer6.js";
+export { createLayer7 } from "./layers/layer7.js";
 export type {
   GraderPackValidationIssue,
   GraderPackValidationIssueCode,
@@ -25,10 +32,14 @@ export {
   validateGraderPack,
 } from "./pack-validation.js";
 export {
+  ADVERSARIAL_FRAMING,
   buildScoreSystemPrompt,
   buildScoreUserPrompt,
+  CONSISTENCY_FRAMING,
+  FAITHFULNESS_FRAMING,
   GOLDEN_REGRESSION_FRAMING,
   LLM_JUDGE_FRAMING,
+  PAIRWISE_COMPARISON_FRAMING,
 } from "./prompt.js";
 export type { GraderModelProvider, GraderScoreRequest, GraderScoreResult } from "./provider.js";
 export {
@@ -43,6 +54,13 @@ export {
   OllamaGraderProvider,
   ScriptedGraderProvider,
 } from "./provider.js";
+export type {
+  GradingReport,
+  GradingReportCaseRow,
+  GradingReportLayerCell,
+} from "./report.js";
+export { buildGradingReport, GradingReportRunNotFoundError } from "./report.js";
+export { renderGradingReportMarkdown } from "./report-markdown.js";
 export { resolveRubric, snapshotRubric, UnknownRubricError } from "./rubric.js";
 export type { RunGradingRunOptions, RunGradingRunResult } from "./scheduler.js";
 export {

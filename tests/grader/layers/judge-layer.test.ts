@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { GraderDb } from "../../../src/grader/db.js";
 import { createSingleJudgeLayer } from "../../../src/grader/layers/judge-layer.js";
 import { createLayer2 } from "../../../src/grader/layers/layer2.js";
 import { createLayer3 } from "../../../src/grader/layers/layer3.js";
@@ -58,6 +59,10 @@ function makePack(rubrics: Record<string, Rubric>): GraderPack {
   };
 }
 
+/** Single-judge layers never touch `db`/`now` — a shared in-memory stand-in satisfies `LayerRunContext`'s shape (Grader Session 6). */
+const db = new GraderDb(":memory:");
+const now = () => 0;
+
 function makeCase(rubricKey: string): Case {
   return {
     id: "case-1",
@@ -80,7 +85,7 @@ describe("createSingleJudgeLayer", () => {
     const layer = createSingleJudgeLayer(3, "framing", provider);
     const pack = makePack({ "tone-eval": toneRubric });
 
-    const outcome = await layer.run({ gradingCase: makeCase("tone-eval"), pack });
+    const outcome = await layer.run({ gradingCase: makeCase("tone-eval"), pack, db, now });
 
     expect(outcome.status).toBe("pass");
     expect(outcome.checks).toHaveLength(2);
@@ -96,7 +101,7 @@ describe("createSingleJudgeLayer", () => {
     const layer = createSingleJudgeLayer(3, "framing", provider);
     const pack = makePack({ "tone-eval": toneRubric });
 
-    const outcome = await layer.run({ gradingCase: makeCase("tone-eval"), pack });
+    const outcome = await layer.run({ gradingCase: makeCase("tone-eval"), pack, db, now });
 
     expect(outcome.status).toBe("fail");
   });
@@ -111,7 +116,7 @@ describe("createSingleJudgeLayer", () => {
     const layer = createSingleJudgeLayer(3, "framing", provider);
     const pack = makePack({ "tone-eval": toneRubric });
 
-    const outcome = await layer.run({ gradingCase: makeCase("tone-eval"), pack });
+    const outcome = await layer.run({ gradingCase: makeCase("tone-eval"), pack, db, now });
 
     expect(outcome.status).toBe("fail");
   });
@@ -123,7 +128,7 @@ describe("createSingleJudgeLayer", () => {
     const layer = createSingleJudgeLayer(3, "framing", provider);
     const pack = makePack({ "numeric-only": numericOnlyRubric });
 
-    const outcome = await layer.run({ gradingCase: makeCase("numeric-only"), pack });
+    const outcome = await layer.run({ gradingCase: makeCase("numeric-only"), pack, db, now });
 
     expect(outcome.status).toBe("pass");
   });
@@ -135,7 +140,7 @@ describe("createSingleJudgeLayer", () => {
     const layer = createSingleJudgeLayer(3, "framing", provider);
     const pack = makePack({ "numeric-only": numericOnlyRubric });
 
-    const outcome = await layer.run({ gradingCase: makeCase("numeric-only"), pack });
+    const outcome = await layer.run({ gradingCase: makeCase("numeric-only"), pack, db, now });
 
     expect(outcome.status).toBe("fail");
   });
@@ -152,10 +157,14 @@ describe("createSingleJudgeLayer", () => {
     const passingOutcome = await createSingleJudgeLayer(3, "framing", passingProvider).run({
       gradingCase: makeCase("hallucination-rate"),
       pack,
+      db,
+      now,
     });
     const failingOutcome = await createSingleJudgeLayer(3, "framing", failingProvider).run({
       gradingCase: makeCase("hallucination-rate"),
       pack,
+      db,
+      now,
     });
 
     expect(passingOutcome.status).toBe("pass");
@@ -172,7 +181,7 @@ describe("createSingleJudgeLayer", () => {
     const layer = createSingleJudgeLayer(3, "framing", provider);
     const pack = makePack({ "tone-eval": toneRubric });
 
-    const outcome = await layer.run({ gradingCase: makeCase("tone-eval"), pack });
+    const outcome = await layer.run({ gradingCase: makeCase("tone-eval"), pack, db, now });
 
     expect(outcome.modelFamily).toBe("scripted");
     expect(outcome.executionTarget).toBe("scripted");
@@ -185,7 +194,7 @@ describe("createSingleJudgeLayer", () => {
     const layer = createSingleJudgeLayer(3, "framing", provider);
     const pack = makePack({ "tone-eval": toneRubric });
 
-    await expect(layer.run({ gradingCase: makeCase("typo-eval"), pack })).rejects.toThrow(
+    await expect(layer.run({ gradingCase: makeCase("typo-eval"), pack, db, now })).rejects.toThrow(
       /isn't declared in GraderPack.rubrics/,
     );
   });
@@ -203,7 +212,7 @@ describe("createLayer2 (golden dataset regression)", () => {
     expect(layer.layerId).toBe(2);
 
     const pack = makePack({ "tone-eval": toneRubric });
-    const outcome = await layer.run({ gradingCase: makeCase("tone-eval"), pack });
+    const outcome = await layer.run({ gradingCase: makeCase("tone-eval"), pack, db, now });
     expect(outcome.status).toBe("pass");
   });
 
@@ -224,7 +233,7 @@ describe("createLayer3 (single LLM-judge)", () => {
     expect(layer.layerId).toBe(3);
 
     const pack = makePack({ "tone-eval": toneRubric });
-    const outcome = await layer.run({ gradingCase: makeCase("tone-eval"), pack });
+    const outcome = await layer.run({ gradingCase: makeCase("tone-eval"), pack, db, now });
     expect(outcome.status).toBe("pass");
   });
 });
