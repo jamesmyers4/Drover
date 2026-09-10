@@ -12,6 +12,8 @@
  * simulation stack's own key decisions.
  */
 
+import type { FindingSeverity } from "../types/index.js";
+
 export type SoakDataPolicy = "synthetic-only" | "restricted";
 
 export type SoakRunStatus = "running" | "completed" | "budget-stopped" | "crashed";
@@ -241,4 +243,34 @@ export interface MetricRecord {
   value: number;
   /** Raw epoch milliseconds. */
   recordedAt: number;
+}
+
+/**
+ * The four cross-turn pattern categories CTS.md Session 6 names — the pass
+ * Grader structurally can't do, since a Grader `Case` is a single
+ * `{input, output, rubric}` triple with no mechanism to compare two
+ * different Cases (ADR 0008). `timing-anomaly` is computed deterministically
+ * (reusing `src/stampede/metrics.ts`'s percentile math directly, no LLM
+ * call); the other three come from the LLM-backed cross-turn pass
+ * (`cross-turn.ts`).
+ */
+export type CrossTurnFindingType =
+  | "disagreement"
+  | "drift"
+  | "recurring-error-cluster"
+  | "timing-anomaly";
+
+/**
+ * One cross-turn pattern finding — the soak-mode analogue of
+ * `CrossSessionFinding`, in-memory only as of Session 6 (no persistence/
+ * match-key yet; that's Session 7's `drover soak analyze` job, per CTS.md).
+ * Reuses the project-wide `FindingSeverity` vocabulary rather than a fourth
+ * severity enum.
+ */
+export interface CrossTurnFinding {
+  type: CrossTurnFindingType;
+  severity: FindingSeverity;
+  description: string;
+  /** The turn ids (from the digests this pass was given) exhibiting this pattern. */
+  turnIds: string[];
 }

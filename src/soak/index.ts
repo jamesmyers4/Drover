@@ -22,13 +22,39 @@ export {
   OllamaSoakContentProvider,
   ScriptedSoakContentProvider,
 } from "./content-provider.js";
+export type { RunCrossTurnAnalysisOptions, RunCrossTurnAnalysisResult } from "./cross-turn.js";
+export {
+  detectTimingAnomalies,
+  MIN_SAMPLES_FOR_TIMING_ANOMALY,
+  runCrossTurnAnalysis,
+  TIMING_ANOMALY_P99_TO_P50_RATIO,
+} from "./cross-turn.js";
+export { buildCrossTurnSystemPrompt, buildCrossTurnUserPrompt } from "./cross-turn-prompt.js";
+export type {
+  CrossTurnProvider,
+  CrossTurnRequest,
+  CrossTurnResponse,
+  RawCrossTurnFinding,
+} from "./cross-turn-provider.js";
+export {
+  BatchCrossTurnProvider,
+  CrossTurnBatchError,
+  DEFAULT_CROSS_TURN_MODEL,
+  ScriptedCrossTurnProvider,
+} from "./cross-turn-provider.js";
+export type { CrossTurnValidationError } from "./cross-turn-validate.js";
+export { isCrossTurnValidationError, validateRawCrossTurnFinding } from "./cross-turn-validate.js";
 export { newSoakId, SoakDb } from "./db.js";
+export type { TurnDigest } from "./digest.js";
+export { buildTurnDigest, chunkArray, DEFAULT_TURNS_PER_CHUNK } from "./digest.js";
 export type { TurnCaseInput } from "./grader-adapter.js";
 export { turnToCase } from "./grader-adapter.js";
 export { soakMigrations } from "./migrations.js";
 export type { RunSoakOptions, RunSoakResult } from "./scheduler.js";
 export { runSoak, SOAK_COST_HEADER } from "./scheduler.js";
 export type {
+  CrossTurnFinding,
+  CrossTurnFindingType,
   MetricRecord,
   PipelineBudget,
   SoakBlueprint,
