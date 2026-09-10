@@ -193,7 +193,7 @@ These are decisions CONTEXT.md left open that got resolved during the build. Ful
 
 Highest-signal ones to know about before extending the codebase:
 
-- `OllamaModelProvider` exists but has never been run against a real local Ollama server — no install was available in this build environment. Small local models' real-world tool-calling reliability under the forced-JSON-schema contract is also unverified.
+- A local Ollama install (`qwen3:8b`) is now available in this build environment (2026-09-09) — one forced-tool-call smoke test against `OllamaGraderProvider`'s `score_checks` schema succeeded, but `OllamaModelProvider`'s `decide_action` path and full multi-turn/Consensus-Round reliability under the forced-JSON-schema contract are still unverified. See `GAPS.md`'s 2026-09-09 entry.
 - `SimConfig.concurrencyCap > 1` runs a real bounded worker pool now, but the run-level budget ceiling becomes best-effort (not exact) once concurrency is above 1 — see `GAPS.md`.
 - The analyst tier's digest now computes true per-checkpoint latency from `ActionEvent.checkpointId` (`checkpointReachTimesMs`), and `Run.checkpointContext` now gives it each checkpoint's description and owning goal — but still no position-within-goal ordering context.
 - The analyst tier's `analystCeilingUsd` budget cap now counts real tokens via Anthropic's `countTokens` endpoint by default, but that path has never been exercised against a live API (no credentials in this build environment) — every test run so far has exercised its chars/4 fallback instead. Chunking's default chunk size (25 sessions) is also a guess, not derived from real run data.
