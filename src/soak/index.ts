@@ -23,6 +23,8 @@ export {
   ScriptedSoakContentProvider,
 } from "./content-provider.js";
 export { newSoakId, SoakDb } from "./db.js";
+export type { TurnCaseInput } from "./grader-adapter.js";
+export { turnToCase } from "./grader-adapter.js";
 export { soakMigrations } from "./migrations.js";
 export type { RunSoakOptions, RunSoakResult } from "./scheduler.js";
 export { runSoak, SOAK_COST_HEADER } from "./scheduler.js";
