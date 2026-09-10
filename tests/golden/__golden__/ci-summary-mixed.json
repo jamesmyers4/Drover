@@ -1,0 +1,60 @@
+{
+  "schemaVersion": 1,
+  "gradingRunId": "grading-run-1",
+  "appName": "toy-app",
+  "status": "completed",
+  "startedAt": 1700000000000,
+  "endedAt": 1700000010000,
+  "casesProcessed": 1,
+  "tasksPassed": 4,
+  "tasksFailed": 0,
+  "tasksSkipped": 0,
+  "totalEscalations": 1,
+  "cases": [
+    {
+      "caseId": "case-1",
+      "rubricKey": "tone-eval",
+      "layers": {
+        "1": {
+          "status": "pass",
+          "checks": [
+            {
+              "name": "output-present",
+              "value": true,
+              "reasoning": "ok"
+            }
+          ]
+        },
+        "4": {
+          "status": "pass",
+          "checks": [
+            {
+              "name": "on-brand-tone",
+              "value": true,
+              "reasoning": "Judges disagreed on this Check; a scoped escalation Task adjudicated the final value."
+            }
+          ]
+        }
+      },
+      "escalationCount": 1,
+      "skipCount": 0
+    }
+  ],
+  "rubricsUsed": {
+    "tone-eval": {
+      "key": "tone-eval",
+      "contentHash": "abc123hash456",
+      "content": {
+        "key": "tone-eval",
+        "description": "Scores tone.",
+        "checks": [
+          {
+            "name": "on-brand-tone",
+            "description": "Warm, not clinical.",
+            "scoringType": "boolean"
+          }
+        ]
+      }
+    }
+  }
+}

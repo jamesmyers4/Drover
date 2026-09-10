@@ -1,4 +1,6 @@
 export { GraderBudget, GraderBudgetExceededError } from "./budget.js";
+export type { CiCaseResult, CiLayerResult, GraderCiSummary } from "./ci-summary.js";
+export { buildGraderCiSummary, CI_SUMMARY_SCHEMA_VERSION } from "./ci-summary.js";
 export type { RunConsensusRoundOptions, RunConsensusRoundResult } from "./consensus.js";
 export {
   DEFAULT_MAX_DISPATCH_ATTEMPTS,

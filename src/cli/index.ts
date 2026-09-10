@@ -13,6 +13,7 @@ import path from "node:path";
 import { Command } from "commander";
 import { DEFAULT_SESSIONS_PER_CHUNK, runAnalyst } from "../analyst/analyze.js";
 import { DroverDb } from "../db/database.js";
+import { buildGraderCiSummary } from "../grader/ci-summary.js";
 import { GraderDb } from "../grader/db.js";
 import type { GraderModelRouting } from "../grader/grade.js";
 import { runGrading } from "../grader/grade.js";
@@ -220,6 +221,20 @@ async function stampedeCommand(
  * deliberate override (a scratch run, a CI-specific path). Either way,
  * there's no "validate-only, nothing persisted" mode to silently fall into
  * by forgetting a flag.
+ *
+ * **Exit-code contract (FUTUREPLAN.md Grader Session 7; ADR 0005).** A
+ * nonzero exit means the Grading Run itself didn't complete — a pack that
+ * fails `validateGraderPack`, or a genuine orchestration-level fault
+ * (`runGradingRun`'s `crashed` path) — both already propagate as a thrown
+ * error into the top-level `.action()` catch below, which sets
+ * `process.exitCode = 1`; no separate logic was needed to "add" this
+ * contract, only to make it deliberate rather than incidental. This is
+ * deliberately *not* a content-quality gate: whether any Case's Checks
+ * passed, failed, or needed escalation never changes the exit code, since
+ * ADR 0005 left the fail-threshold policy (what a CI gate should treat as
+ * "this run failed") explicitly open — see `docs/GRADER-CI.md`. A consuming
+ * CI workflow makes that call itself by parsing `--json`'s output, not by
+ * reading this tool's exit code as a proxy for it.
  */
 /**
  * Default `GraderModelRouting` for a bare `drover grade` invocation with no
@@ -270,7 +285,7 @@ function defaultGraderRouting(
 
 async function gradeCommand(
   packPath: string,
-  options: { db?: string; report?: string },
+  options: { db?: string; report?: string; json?: string | boolean },
 ): Promise<void> {
   await registerTsLoader();
 
@@ -308,6 +323,24 @@ async function gradeCommand(
       console.log(`\nGrading report written to ${options.report}`);
     } else {
       console.log(`\n${markdown}`);
+    }
+
+    // The CI JSON summary (ADR 0005) is opt-in via `--json` — unlike the
+    // markdown report above, it's not printed by default, since it's a
+    // machine-facing artifact a human running this interactively has no use
+    // for cluttering their terminal with. `--json` alone (no path) prints
+    // it to stdout instead, same "path optional, defaults to stdout"
+    // precedent `--report`/`drover report`'s `--out` already established.
+    if (options.json !== undefined) {
+      const summary = buildGraderCiSummary(report);
+      const json = JSON.stringify(summary, null, 2);
+      if (typeof options.json === "string") {
+        mkdirSync(path.dirname(options.json) || ".", { recursive: true });
+        writeFileSync(options.json, json);
+        console.log(`CI JSON summary written to ${options.json}`);
+      } else {
+        console.log(json);
+      }
     }
   } finally {
     db.close();
@@ -484,14 +517,23 @@ program
     "-r, --report <path>",
     "write the Grading report to this file instead of printing it to stdout",
   )
-  .action(async (packPath: string, options: { db?: string; report?: string }) => {
-    try {
-      await gradeCommand(packPath, options);
-    } catch (err) {
-      console.error(err instanceof Error ? err.message : err);
-      process.exitCode = 1;
-    }
-  });
+  .option(
+    "-j, --json [path]",
+    "emit the versioned CI JSON summary (ADR 0005) — to this file if a path is given, to stdout otherwise; omit entirely to skip it",
+  )
+  .action(
+    async (
+      packPath: string,
+      options: { db?: string; report?: string; json?: string | boolean },
+    ) => {
+      try {
+        await gradeCommand(packPath, options);
+      } catch (err) {
+        console.error(err instanceof Error ? err.message : err);
+        process.exitCode = 1;
+      }
+    },
+  );
 
 const soakCommand = program
   .command("soak")
