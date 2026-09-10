@@ -16,7 +16,7 @@ import { DroverDb } from "../db/database.js";
 import { GraderDb } from "../grader/db.js";
 import type { GraderModelRouting } from "../grader/grade.js";
 import { runGrading } from "../grader/grade.js";
-import { DEFAULT_GRADER_OLLAMA_MODEL } from "../grader/provider.js";
+import { DEFAULT_GRADER_OLLAMA_MODEL, DEFAULT_HOSTED_GRADER_MODEL } from "../grader/provider.js";
 import { buildGradingReport } from "../grader/report.js";
 import { renderGradingReportMarkdown } from "../grader/report-markdown.js";
 import type { GraderPack } from "../grader/types.js";
@@ -223,20 +223,48 @@ async function stampedeCommand(
  */
 /**
  * Default `GraderModelRouting` for a bare `drover grade` invocation with no
- * routing override: Layers 2-3 dispatch to the local Ollama model
- * (`DEFAULT_GRADER_OLLAMA_MODEL`); Layers 4-7 have no default judges at all
- * — `buildLayerRegistry` (Grader Session 6) needs >= 2 distinct-model-family
- * judges plus an escalation route to enable them, and this build
- * environment (like most fresh installs) only has one local model pulled.
- * Rather than fake diversity or fail the whole run, the CLI accepts that
- * gap and lets `buildLayerRegistry`'s own warning surface it — Layers 4-7
- * simply don't dispatch until a second distinct judge is actually
- * available. See GAPS.md's 2026-09-09 entry.
+ * routing override. Layers 2-3 always dispatch to the local Ollama model
+ * (`DEFAULT_GRADER_OLLAMA_MODEL`) — the "$0 by design" routine-work judge
+ * (FUTUREPLAN.md's cost-basis note).
+ *
+ * Layers 4-7 (multi-judge Consensus Round) need >= 2 distinct-model-family
+ * judges plus an escalation route (ADR 0003) — this build environment (like
+ * most fresh installs) has only one local model pulled, so the second judge
+ * comes from Anthropic instead, *when it's actually usable*: an
+ * `ANTHROPIC_API_KEY` is present in the environment, and the pack's own
+ * `dataPolicy`/`allowHostedEscalation` would allow a hosted dispatch in the
+ * first place (mirrors `assertHostedGraderDispatchAllowed`'s own rule,
+ * checked here rather than by catching its throw, so an unusable pack
+ * degrades to "just Layers 1-3" the same graceful way as having no second
+ * judge at all — never a crashed `drover grade` invocation over the CLI's
+ * own default choice). Ollama does the routine per-Case judging (one of the
+ * two Consensus votes, alongside Layers 2-3's single-judge work); Anthropic
+ * (`DEFAULT_HOSTED_GRADER_MODEL`) supplies the second, independent vote and
+ * doubles as the escalation adjudicator — a real second opinion from the
+ * paid model specifically when the two disagree, not a per-Case cost.
+ * Escalation is the rare path (Q10) — this keeps real dollar spend small by
+ * design, matching the "Ollama does the work, Anthropic is a second-stage
+ * check" split the user asked for. When neither condition holds, Layers 4-7
+ * are left out entirely (a console warning, not an error) — see
+ * GAPS.md's 2026-09-09 entries for the fuller history of this gap.
  */
-function defaultGraderRouting(): GraderModelRouting {
+function defaultGraderRouting(
+  pack: Pick<GraderPack, "dataPolicy" | "allowHostedEscalation">,
+): GraderModelRouting {
+  const ollamaJudge = { provider: "ollama", model: DEFAULT_GRADER_OLLAMA_MODEL };
+  const hostedDispatchAllowed =
+    pack.dataPolicy !== "restricted" || pack.allowHostedEscalation === true;
+  const hasAnthropicKey = Boolean(process.env.ANTHROPIC_API_KEY);
+
+  if (!hostedDispatchAllowed || !hasAnthropicKey) {
+    return { singleJudge: ollamaJudge, consensusJudges: [] };
+  }
+
+  const anthropicJudge = { provider: "anthropic", model: DEFAULT_HOSTED_GRADER_MODEL };
   return {
-    singleJudge: { provider: "ollama", model: DEFAULT_GRADER_OLLAMA_MODEL },
-    consensusJudges: [],
+    singleJudge: ollamaJudge,
+    consensusJudges: [ollamaJudge, anthropicJudge],
+    escalation: anthropicJudge,
   };
 }
 
@@ -250,14 +278,21 @@ async function gradeCommand(
   const dbPath = options.db ?? "grader.sqlite";
   mkdirSync(path.dirname(dbPath) || ".", { recursive: true });
 
+  const routing = defaultGraderRouting(pack);
   console.log(`Grading "${pack.appName}"`);
   console.log(`  dataPolicy:            ${pack.dataPolicy}`);
   console.log(`  allowHostedEscalation: ${pack.allowHostedEscalation ?? false}`);
+  console.log(
+    `  layer 2-3 judge:       ${routing.singleJudge.provider}:${routing.singleJudge.model}`,
+  );
+  console.log(
+    `  layer 4-7 judges:      ${routing.consensusJudges.map((r) => `${r.provider}:${r.model}`).join(", ") || "none"}`,
+  );
   console.log(`  db:                    ${dbPath}\n`);
 
   const db = new GraderDb(dbPath);
   try {
-    const result = await runGrading({ db, pack, routing: defaultGraderRouting() });
+    const result = await runGrading({ db, pack, routing });
     console.log(`Grading run ${result.gradingRunId}: ${result.status}`);
     console.log(`  cases processed:        ${result.casesProcessed}`);
     console.log(`  tasks passed:           ${result.tasksPassed}`);
