@@ -76,11 +76,14 @@ export interface RunSoakAnalysisResult {
  * findings. The cross-turn pass always runs (it needs nothing but this
  * run's own turns); the Grader pass runs only when `opts.blueprint.
  * graderIntegration` is configured, building a `GraderPack` on the fly from
- * it — `loadCases` maps every turn through `turnToCase` with the
- * blueprint-supplied `rubricKeyFor`/`contextFor`, `dataPolicy` is reused
- * directly from the blueprint (restricted soak content should stay behind
- * local judges for grading too, not just for driving), and judge routing
- * defaults via `defaultGraderRouting` unless the caller overrides it.
+ * it — `loadCases` maps every turn with a real response through `turnToCase`
+ * with the blueprint-supplied `rubricKeyFor`/`contextFor` (a turn with no
+ * `responsePayload` — e.g. a variation failure that never reached HTTP
+ * dispatch — is excluded first: it has nothing to grade, and Grader's own
+ * `Case.output` is NOT NULL), `dataPolicy` is reused directly from the
+ * blueprint (restricted soak content should stay behind local judges for
+ * grading too, not just for driving), and judge routing defaults via
+ * `defaultGraderRouting` unless the caller overrides it.
  */
 export async function runSoakAnalysis(
   opts: RunSoakAnalysisOptions,
@@ -122,10 +125,20 @@ export async function runSoakAnalysis(
     const graderPack: GraderPack = {
       appName: opts.blueprint.appName,
       rubrics: integration.rubrics,
+      // A turn with no responsePayload (e.g. a variation failure that never
+      // reached HTTP dispatch — scheduler.ts's dispatchTurn) has nothing to
+      // grade: Grader's own Case.output is NOT NULL, and there's no content
+      // for a rubric to judge in the first place. Found for real running
+      // Soak Session 8's own reference validation (a Case with `output:
+      // undefined` throws a real SQLITE_CONSTRAINT_NOTNULL, not a
+      // hypothetical) — excluded here rather than crashing the whole
+      // Grader pass over turns that were never going to be gradeable.
       loadCases: () =>
-        turns.map((turn) =>
-          turnToCase(turn, integration.rubricKeyFor, integration.contextFor?.(turn)),
-        ),
+        turns
+          .filter((turn) => turn.responsePayload !== undefined)
+          .map((turn) =>
+            turnToCase(turn, integration.rubricKeyFor, integration.contextFor?.(turn)),
+          ),
       dataPolicy: opts.blueprint.dataPolicy,
       ...(integration.layers !== undefined && { layers: integration.layers }),
       ...(integration.allowHostedEscalation !== undefined && {

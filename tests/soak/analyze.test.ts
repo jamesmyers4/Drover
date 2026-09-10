@@ -236,6 +236,66 @@ describe("runSoakAnalysis", () => {
     }
   });
 
+  it("excludes turns with no responsePayload from the Grader pass (regression: Case.output is NOT NULL)", async () => {
+    const db = new SoakDb(":memory:");
+    const graderDb = new GraderDb(":memory:");
+    try {
+      const run = makeSoakRun();
+      db.insertSoakRun(run);
+      const gradeable = makeTurn(run.id, {
+        id: "t-gradeable",
+        requestPayload: { text: "Had a calm day." },
+        responsePayload: { ok: true },
+      });
+      const variationFailed = makeTurn(run.id, {
+        id: "t-variation-failed",
+        responsePayload: undefined,
+        httpStatus: undefined,
+        responseTimeMs: undefined,
+        explicitError: true,
+        errorDetail: "variation failed: script exhausted",
+      });
+      db.insertTurn(gradeable);
+      db.insertTurn(variationFailed);
+
+      const blueprint = makeBlueprint({
+        graderIntegration: {
+          rubrics: {
+            "tone-eval": {
+              key: "tone-eval",
+              description: "d",
+              checks: [{ name: "x", description: "d", scoringType: "boolean" }],
+            },
+          },
+          rubricKeyFor: () => "tone-eval",
+          layers: { 2: { enabled: false }, 3: { enabled: false } },
+        },
+      });
+
+      const result = await runSoakAnalysis({
+        db,
+        runId: run.id,
+        blueprint,
+        graderDb,
+        routing: { singleJudge: { provider: "ollama", model: "unused" }, consensusJudges: [] },
+        crossTurnProvider: new ScriptedCrossTurnProvider([]),
+      });
+
+      expect(result.grader).toBeDefined();
+      if (result.grader === undefined) throw new Error("expected result.grader to be defined");
+      // Only the gradeable turn became a Case — the variation-failed turn
+      // (no responsePayload) was excluded, not fed in as a NOT-NULL
+      // violation.
+      expect(result.grader.casesProcessed).toBe(1);
+      const cases = graderDb.getCasesByGradingRun(result.grader.gradingRunId);
+      expect(cases).toHaveLength(1);
+      expect(cases[0]?.output).toEqual(gradeable.responsePayload);
+    } finally {
+      graderDb.close();
+      db.close();
+    }
+  });
+
   it("accumulates cross-turn cost across repeated invocations", async () => {
     const db = new SoakDb(":memory:");
     try {

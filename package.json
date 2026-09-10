@@ -21,9 +21,11 @@
     "smoke:orchestrator": "tsx scripts/smoke-orchestrator.ts",
     "smoke:analyst": "tsx scripts/smoke-analyst.ts",
     "smoke:stampede": "tsx scripts/smoke-stampede.ts",
+    "smoke:soak": "tsx scripts/smoke-soak.ts",
     "preflight:hhops": "tsx scripts/preflight-hhops.ts",
     "drover": "tsx src/cli/index.ts",
-    "example:serve": "tsx examples/toy-app/site-server.ts"
+    "example:serve": "tsx examples/toy-app/site-server.ts",
+    "example:serve-soak": "tsx examples/soak-toy-fixture/site-server.ts"
   },
   "keywords": [
     "qa",
