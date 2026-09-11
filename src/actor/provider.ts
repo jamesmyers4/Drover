@@ -322,7 +322,7 @@ export class ScriptedModelProvider implements ModelProvider {
     private readonly costPerCallUsd = 0,
   ) {}
 
-  async decide(): Promise<ActorDecideResult> {
+  async decide(_request?: ActorDecideRequest): Promise<ActorDecideResult> {
     const decision = this.script[this.index];
     if (!decision) {
       throw new Error(`ScriptedModelProvider script exhausted after ${this.index} calls`);

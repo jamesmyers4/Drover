@@ -194,7 +194,7 @@ export class ScriptedAnalystProvider implements AnalystProvider {
     private readonly costUsd = 0,
   ) {}
 
-  async analyze(): Promise<AnalystResponse> {
+  async analyze(_request?: AnalystRequest): Promise<AnalystResponse> {
     return {
       findings: this.response,
       usage: {

@@ -7,6 +7,7 @@ import type {
   SoakRun,
   TurnRecord,
 } from "../../src/soak/types.js";
+import { asFixture, type Loosen } from "../type-utils.js";
 
 const sampleBlueprintConfig: SoakBlueprintConfigSnapshot = {
   appName: "shenny",
@@ -50,8 +51,8 @@ function makeSoakRun(): SoakRun {
   };
 }
 
-function makeTurn(runId: string, overrides: Partial<TurnRecord> = {}): TurnRecord {
-  return {
+function makeTurn(runId: string, overrides: Loosen<TurnRecord> = {}): TurnRecord {
+  return asFixture<TurnRecord>({
     id: newSoakId(),
     runId,
     sequence: 1,
@@ -64,7 +65,7 @@ function makeTurn(runId: string, overrides: Partial<TurnRecord> = {}): TurnRecor
     explicitError: false,
     timestamp: Date.now(),
     ...overrides,
-  };
+  });
 }
 
 function makeMetric(runId: string, overrides: Partial<MetricRecord> = {}): MetricRecord {

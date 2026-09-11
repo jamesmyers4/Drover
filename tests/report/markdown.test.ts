@@ -2,9 +2,10 @@ import { describe, it } from "vitest";
 import { renderMarkdownReport } from "../../src/report/markdown.js";
 import type { RunReport } from "../../src/report/report.js";
 import { expectMatchesGolden } from "../golden/golden-file.js";
+import { asFixture, type Loosen } from "../type-utils.js";
 
-function makeReport(overrides?: Partial<RunReport>): RunReport {
-  return {
+function makeReport(overrides?: Loosen<RunReport>): RunReport {
+  return asFixture<RunReport>({
     runId: "run-1",
     appName: "horse-haven-ops",
     status: "completed",
@@ -44,7 +45,7 @@ function makeReport(overrides?: Partial<RunReport>): RunReport {
     },
     stampedeRuns: [],
     ...overrides,
-  };
+  });
 }
 
 describe("renderMarkdownReport", () => {

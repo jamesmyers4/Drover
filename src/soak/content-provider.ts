@@ -163,7 +163,7 @@ export class ScriptedSoakContentProvider implements SoakContentProvider {
 
   constructor(private readonly script: string[]) {}
 
-  async vary(): Promise<SoakVariationResult> {
+  async vary(_request?: SoakVariationRequest): Promise<SoakVariationResult> {
     const variedText = this.script[this.index];
     if (variedText === undefined) {
       throw new Error(`ScriptedSoakContentProvider script exhausted after ${this.index} calls`);

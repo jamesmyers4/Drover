@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { buildSessionDigest } from "../../src/analyst/digest.js";
 import { DroverDb, newId } from "../../src/db/database.js";
 import type { InSessionFinding, PersonaSession, Run, SimConfig } from "../../src/types/index.js";
+import { asFixture, type Loosen } from "../type-utils.js";
 
 const config: SimConfig = {
   targetBaseUrl: "http://127.0.0.1:0",
@@ -24,7 +25,7 @@ describe("buildSessionDigest", () => {
     db.close();
   });
 
-  function makeSession(overrides?: Partial<PersonaSession>): PersonaSession {
+  function makeSession(overrides?: Loosen<PersonaSession>): PersonaSession {
     const run: Run = {
       id: newId(),
       appName: "fixture-app",
@@ -33,7 +34,7 @@ describe("buildSessionDigest", () => {
       startedAt: 0,
     };
     db.insertRun(run);
-    const session: PersonaSession = {
+    const session = asFixture<PersonaSession>({
       id: newId(),
       runId: run.id,
       personaId: "p1",
@@ -42,7 +43,7 @@ describe("buildSessionDigest", () => {
       startedAt: 1000,
       endedAt: 5000,
       ...overrides,
-    };
+    });
     db.insertSession(session);
     return session;
   }

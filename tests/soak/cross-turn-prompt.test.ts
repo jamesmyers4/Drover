@@ -5,9 +5,10 @@ import {
 } from "../../src/soak/cross-turn-prompt.js";
 import { buildTurnDigest } from "../../src/soak/digest.js";
 import type { TurnRecord } from "../../src/soak/types.js";
+import { asFixture, type Loosen } from "../type-utils.js";
 
-function makeTurn(overrides: Partial<TurnRecord> = {}): TurnRecord {
-  return {
+function makeTurn(overrides: Loosen<TurnRecord> = {}): TurnRecord {
+  return asFixture<TurnRecord>({
     id: "turn-1",
     runId: "run-1",
     sequence: 1,
@@ -20,7 +21,7 @@ function makeTurn(overrides: Partial<TurnRecord> = {}): TurnRecord {
     explicitError: false,
     timestamp: 1700000000000,
     ...overrides,
-  };
+  });
 }
 
 describe("buildCrossTurnSystemPrompt", () => {

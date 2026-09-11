@@ -183,7 +183,7 @@ export class ScriptedCrossTurnProvider implements CrossTurnProvider {
     private readonly costUsd = 0,
   ) {}
 
-  async analyze(): Promise<CrossTurnResponse> {
+  async analyze(_request?: CrossTurnRequest): Promise<CrossTurnResponse> {
     return {
       findings: this.response,
       usage: {

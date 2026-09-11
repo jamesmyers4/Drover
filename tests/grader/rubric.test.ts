@@ -58,7 +58,8 @@ describe("snapshotRubric", () => {
           ...toneRubric.checks[0],
           description: "A materially different description.",
         } as Rubric["checks"][number],
-        toneRubric.checks[1],
+        // biome-ignore lint/style/noNonNullAssertion: toneRubric.checks is a fixed 2-element literal defined above
+        toneRubric.checks[1]!,
       ],
     };
     expect(snapshotRubric(changed).contentHash).not.toBe(snapshotRubric(toneRubric).contentHash);
@@ -68,7 +69,8 @@ describe("snapshotRubric", () => {
     const changed: Rubric = {
       ...toneRubric,
       checks: [
-        toneRubric.checks[0],
+        // biome-ignore lint/style/noNonNullAssertion: toneRubric.checks is a fixed 2-element literal defined above
+        toneRubric.checks[0]!,
         {
           ...toneRubric.checks[1],
           passThreshold: { comparison: "gte", value: 4 },

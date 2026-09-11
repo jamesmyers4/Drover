@@ -360,7 +360,7 @@ export class AnthropicGraderProvider implements GraderModelProvider {
 export class ScriptedGraderProvider implements GraderModelProvider {
   readonly provider = "scripted";
   readonly model = "scripted";
-  readonly modelFamily = "scripted";
+  readonly modelFamily: string = "scripted";
   readonly executionTarget = "scripted";
   private index = 0;
 
@@ -369,7 +369,7 @@ export class ScriptedGraderProvider implements GraderModelProvider {
     private readonly costPerCallUsd = 0,
   ) {}
 
-  async score(): Promise<GraderScoreResult> {
+  async score(_request?: GraderScoreRequest): Promise<GraderScoreResult> {
     const checks = this.script[this.index];
     if (!checks) {
       throw new Error(`ScriptedGraderProvider script exhausted after ${this.index} calls`);
